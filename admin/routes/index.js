@@ -1,3 +1,4 @@
+// admin/routes/index.js
 const express    = require('express');
 const router     = express.Router();
 const {
@@ -26,7 +27,6 @@ const backupCtrl      = require('../controllers/backupController');
 // ─────────────────────────────────────────
 router.get('/login', (req, res) => {
   if (req.session?.admin) return res.redirect('/admin/dashboard');
-  // csrfToken متاح عبر res.locals من middleware في app.js
   res.render('login', {
     error:     res.locals.error || null,
     csrfToken: res.locals.csrfToken || '',
@@ -78,13 +78,16 @@ router.post('/orders/manual/:id/status',   authMiddleware, ordersCtrl.updateManu
 // ─────────────────────────────────────────
 // PRODUCTS
 // ─────────────────────────────────────────
-router.get('/products',              authMiddleware, productsCtrl.index);
-router.get('/products/create',       authMiddleware, productsCtrl.createForm);
-router.post('/products',             authMiddleware, productsCtrl.create);
-router.get('/products/:id/edit',     authMiddleware, productsCtrl.editForm);
-router.post('/products/:id',         authMiddleware, productsCtrl.update);
-router.post('/products/:id/delete',  authMiddleware, superAdminOnly, productsCtrl.delete);
-router.post('/products/sync',        authMiddleware, productsCtrl.syncSatofill);
+router.get('/products',             authMiddleware, productsCtrl.index);
+router.get('/products/create',      authMiddleware, productsCtrl.createForm);
+router.post('/products',            authMiddleware, productsCtrl.create);
+
+// ⚠️ الإصلاح الحرجي: يجب أن تأتي المسارات الثابتة (sync) قبل الديناميكية (:id)
+router.post('/products/sync',       authMiddleware, productsCtrl.syncSatofill);
+
+router.get('/products/:id/edit',    authMiddleware, productsCtrl.editForm);
+router.post('/products/:id',        authMiddleware, productsCtrl.update);
+router.post('/products/:id/delete', authMiddleware, superAdminOnly, productsCtrl.delete);
 
 // ─────────────────────────────────────────
 // DEPOSIT METHODS

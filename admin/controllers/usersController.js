@@ -1,7 +1,8 @@
+// admin/controllers/usersController.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
-const userSvc  = require('../../services/userService');
-const walletSvc= require('../../services/walletService');
+const userSvc   = require('../../services/userService');
+const walletSvc = require('../../services/walletService');
 const { logAudit } = require('../../middleware/auth');
 
 async function index(req, res) {
@@ -19,44 +20,83 @@ async function index(req, res) {
 }
 
 async function show(req, res) {
-  const user = await prisma.user.findUnique({
-    where:   { id: parseInt(req.params.id) },
-    include: {
-      orders:      { take: 5, orderBy: { createdAt: 'desc' } },
-      deposits:    { take: 5, orderBy: { createdAt: 'desc' } },
-      withdrawals: { take: 5, orderBy: { createdAt: 'desc' } },
-      referrals:   { take: 5, orderBy: { createdAt: 'desc' }, as: 'referralGiven' },
-      _count: { select: { orders: true, deposits: true, withdrawals: true } },
-    },
-  });
-
-  if (!user) {
-    req.session.error = 'المستخدم غير موجود';
+  const userId = parseInt(req.params.id);
+  if (isNaN(userId)) {
+    req.session.error = 'معرف غير صالح';
     return res.redirect('/admin/users');
   }
 
-  res.render('user-edit', { title: `مستخدم #${user.id}`, user });
+  try {
+    const user = await prisma.user.findUnique({
+      where:   { id: userId },
+      include: {
+        orders:        { take: 5, orderBy: { createdAt: 'desc' }, include: { product: true } },
+        deposits:      { take: 5, orderBy: { createdAt: 'desc' }, include: { method: true } },
+        withdrawals:   { take: 5, orderBy: { createdAt: 'desc' }, include: { method: true } },
+        // ⚠️ الإصلاح: الاسم الصحيح من schema.prisma هو referralGiven وليس referrals
+        // وإزالة خيار "as" الذي لا يوجد في Prisma
+        referralGiven: { take: 5, orderBy: { createdAt: 'desc' } },
+        _count: { select: { orders: true, deposits: true, withdrawals: true } },
+      },
+    });
+
+    if (!user) {
+      req.session.error = 'المستخدم غير موجود';
+      return res.redirect('/admin/users');
+    }
+
+    res.render('user-edit', { title: `مستخدم #${user.id}`, user });
+  } catch (err) {
+    console.error('[USERS:show]', err);
+    req.session.error = 'حدث خطأ أثناء تحميل بيانات المستخدم';
+    res.redirect('/admin/users');
+  }
 }
 
 async function editForm(req, res) {
-  const user = await prisma.user.findUnique({
-    where: { id: parseInt(req.params.id) },
-  });
-  if (!user) {
-    req.session.error = 'المستخدم غير موجود';
+  const userId = parseInt(req.params.id);
+  if (isNaN(userId)) {
+    req.session.error = 'معرف غير صالح';
     return res.redirect('/admin/users');
   }
-  res.render('user-edit', { title: `تعديل مستخدم #${user.id}`, user });
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        _count: { select: { orders: true, deposits: true, withdrawals: true } },
+      },
+    });
+
+    if (!user) {
+      req.session.error = 'المستخدم غير موجود';
+      return res.redirect('/admin/users');
+    }
+
+    res.render('user-edit', { title: `تعديل مستخدم #${user.id}`, user });
+  } catch (err) {
+    console.error('[USERS:editForm]', err);
+    req.session.error = 'حدث خطأ أثناء تحميل بيانات المستخدم';
+    res.redirect('/admin/users');
+  }
 }
 
 async function adjustBalance(req, res) {
   const { amount, description } = req.body;
   const userId = parseInt(req.params.id);
 
+  if (isNaN(userId)) {
+    req.session.error = 'معرف غير صالح';
+    return res.redirect('/admin/users');
+  }
+
   try {
+    const amt = parseFloat(amount);
+    if (isNaN(amt)) throw new Error('المبلغ غير صالح');
+
     await walletSvc.adminAdjustBalance(
       userId,
-      parseFloat(amount),
+      amt,
       description || 'Admin adjustment'
     );
 
@@ -81,6 +121,11 @@ async function ban(req, res) {
   const userId = parseInt(req.params.id);
   const { reason } = req.body;
 
+  if (isNaN(userId)) {
+    req.session.error = 'معرف غير صالح';
+    return res.redirect('/admin/users');
+  }
+
   try {
     await userSvc.banUser(userId, reason);
     await logAudit({
@@ -101,6 +146,11 @@ async function ban(req, res) {
 
 async function unban(req, res) {
   const userId = parseInt(req.params.id);
+
+  if (isNaN(userId)) {
+    req.session.error = 'معرف غير صالح';
+    return res.redirect('/admin/users');
+  }
 
   try {
     await userSvc.unbanUser(userId);
@@ -123,9 +173,16 @@ async function changeReferral(req, res) {
   const userId = parseInt(req.params.id);
   const { referralCode } = req.body;
 
+  if (isNaN(userId)) {
+    req.session.error = 'معرف غير صالح';
+    return res.redirect('/admin/users');
+  }
+
   try {
+    if (!referralCode || !referralCode.trim()) throw new Error('رمز الإحالة مطلوب');
+
     const referrer = await prisma.user.findUnique({
-      where: { referralCode: referralCode.toUpperCase() },
+      where: { referralCode: referralCode.toUpperCase().trim() },
     });
 
     if (!referrer) throw new Error('رمز الإحالة غير موجود');

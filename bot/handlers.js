@@ -787,24 +787,29 @@ function register(bot) {
       return ctx.reply('🔗 أدخل رابط الحساب:', keyboards.cancelButton());
     }
 
+
+
     // ── AUTO SERVICE: link step ──
     if (step === 'auto_link') {
       const link      = text;
       const productId = ctx.session.selectedProductId;
       const quantity  = ctx.session.autoQuantity;
 
-      // Duplicate check
-      const isDuplicate = await orderSvc.checkDuplicateOrder(user.id, productId);
-      if (isDuplicate) {
-        return ctx.reply('⚠️ لديك طلب مماثل في آخر 5 دقائق. هل تريد المتابعة؟',
-          keyboards.confirmCancel()
-        );
+      // ⚠️ الإصلاح: حفظ الرابط وتغيير الـ step قبل فحص التكرار
+      // حتى إذا كان مكرراً يظل المستخدم على step = auto_confirm
+      ctx.session.autoLink = link;
+      ctx.session.step     = 'auto_confirm';
+
+      const product  = await prisma.product.findUnique({
+        where: { id: productId },
+        include: { group: true },
+      });
+
+      if (!product) {
+        ctx.session.step = null;
+        return ctx.reply('❌ الخدمة غير موجودة. يرجى المحاولة مجدداً.', keyboards.mainMenu(user));
       }
 
-      ctx.session.autoLink = link;
-      ctx.session.step = 'auto_confirm';
-
-      const product  = await prisma.product.findUnique({ where: { id: productId } });
       const settings = await settingsSvc.getAllSettings();
       const rate     = parseFloat(settings.exchange_rate || '3.75');
       const margin   = parseFloat(settings.profit_margin || '0.20');
@@ -813,11 +818,25 @@ function register(bot) {
       const pricePerUnit = parseFloat(product.priceUsd) * (1 + margin) * (1 - discount);
       const totalLocal   = (pricePerUnit * quantity * rate).toFixed(4);
 
+      // فحص التكرار — الآن يظهر رسالة تأكيد مختلفة لكن يبقى step على auto_confirm
+      const isDuplicate = await orderSvc.checkDuplicateOrder(user.id, productId);
+      if (isDuplicate) {
+        return ctx.reply(
+          `⚠️ *لديك طلب مماثل في آخر 5 دقائق!*\n\n` +
+          `📦 الخدمة: ${product.name}\n` +
+          `🔢 الكمية: ${quantity}\n` +
+          `🔗 الرابط: \`${link}\`\n` +
+          `💰 الإجمالي: *${totalLocal}$*\n\n` +
+          `هل تريد المتابعة رغم ذلك؟`,
+          { parse_mode: 'Markdown', ...keyboards.confirmCancel() }
+        );
+      }
+
       return ctx.reply(
         `📋 *تأكيد الطلب*\n\n` +
         `📦 الخدمة: ${product.name}\n` +
         `🔢 الكمية: ${quantity}\n` +
-        `🔗 الرابط: ${link}\n` +
+        `🔗 الرابط: \`${link}\`\n` +
         `💰 الإجمالي: *${totalLocal}$*\n\n` +
         `هل تريد تأكيد الطلب؟`,
         { parse_mode: 'Markdown', ...keyboards.confirmCancel() }
