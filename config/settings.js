@@ -32,7 +32,8 @@ module.exports = {
 
   satofill: {
     apiKey: process.env.SATOFILL_API_KEY,
-    apiUrl: process.env.SATOFILL_API_URL || 'https://satofill.com/api',
+    // الـ URL الصحيح من توثيق Satofill
+    apiUrl: process.env.SATOFILL_API_URL || 'https://satofill.com/wp-json/mps/v1',
   },
 
   pricing: {
