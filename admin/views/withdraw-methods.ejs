@@ -1,0 +1,55 @@
+<%
+const pageBody = `
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+  <h2 style="font-size:1.1rem;">طرق السحب</h2>
+  <a href="/admin/withdraw-methods/create" class="btn btn-primary">
+    <i class="bi bi-plus-lg"></i> إضافة طريقة
+  </a>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>الاسم</th><th>الرسوم</th><th>الحد الأدنى</th>
+          <th>الحد الأقصى</th><th>الحالة</th><th>إجراء</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${methods.map(m => `
+        <tr>
+          <td>${m.id}</td>
+          <td><strong>${m.name}</strong></td>
+          <td>
+            ${m.feeType === 'percentage'
+              ? (parseFloat(m.feeValue)*100).toFixed(1)+'%'
+              : parseFloat(m.feeValue).toFixed(2)+'$'}
+          </td>
+          <td>${m.minAmount}$</td>
+          <td>${m.maxAmount}$</td>
+          <td>
+            <span class="badge ${m.isActive ? 'badge-success' : 'badge-danger'}">
+              ${m.isActive ? 'نشط' : 'معطل'}
+            </span>
+          </td>
+          <td style="display:flex;gap:6px;">
+            <a href="/admin/withdraw-methods/${m.id}/edit" class="btn btn-sm btn-primary">
+              <i class="bi bi-pencil"></i> تعديل
+            </a>
+            <form action="/admin/withdraw-methods/${m.id}/toggle" method="POST">
+              <input type="hidden" name="_csrf" value="${csrfToken}">
+              <button class="btn btn-sm ${m.isActive ? 'btn-warning' : 'btn-success'}">
+                ${m.isActive ? 'تعطيل' : 'تفعيل'}
+              </button>
+            </form>
+          </td>
+        </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+</div>
+`;
+%>
+<%- include('layout', { body: pageBody }) %>

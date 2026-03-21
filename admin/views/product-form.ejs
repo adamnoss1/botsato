@@ -1,0 +1,102 @@
+<%
+const isEdit  = product !== null;
+const pageBody = `
+<div style="margin-bottom:20px;">
+  <a href="/admin/products" class="btn btn-outline btn-sm">
+    <i class="bi bi-arrow-right"></i> رجوع للمنتجات
+  </a>
+</div>
+
+<div class="card" style="max-width:700px;">
+  <div class="card-header">${isEdit ? '✏️ تعديل منتج' : '➕ إضافة منتج جديد'}</div>
+  <div class="card-body">
+    <form action="${isEdit ? '/admin/products/'+product.id : '/admin/products'}" method="POST">
+      <input type="hidden" name="_csrf" value="${csrfToken}">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+        <div class="form-group">
+          <label class="form-label">اسم المنتج *</label>
+          <input type="text" name="name" class="form-control" required
+                 value="${isEdit ? product.name : ''}">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">الاسم بالعربي</label>
+          <input type="text" name="nameAr" class="form-control"
+                 value="${isEdit && product.nameAr ? product.nameAr : ''}">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">الفئة *</label>
+          <select name="groupId" class="form-control" required>
+            ${groups.map(g => `
+              <option value="${g.id}" ${isEdit && product.groupId === g.id ? 'selected' : ''}>
+                ${g.name}
+              </option>
+            `).join('')}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Satofill Service ID</label>
+          <input type="text" name="satofillId" class="form-control"
+                 value="${isEdit && product.satofillId ? product.satofillId : ''}">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">السعر بالدولار *</label>
+          <input type="number" step="0.000001" name="priceUsd" class="form-control" required
+                 value="${isEdit ? product.priceUsd : ''}">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">هامش الربح (0.20 = 20%)</label>
+          <input type="number" step="0.01" name="profitMargin" class="form-control"
+                 value="${isEdit ? product.profitMargin : '0.20'}">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">الحد الأدنى للكمية</label>
+          <input type="number" name="minQuantity" class="form-control"
+                 value="${isEdit ? product.minQuantity : '100'}">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">الحد الأقصى للكمية</label>
+          <input type="number" name="maxQuantity" class="form-control"
+                 value="${isEdit ? product.maxQuantity : '100000'}">
+        </div>
+
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">الوصف</label>
+        <textarea name="description" class="form-control" rows="3">${isEdit && product.description ? product.description : ''}</textarea>
+      </div>
+
+      <div style="display:flex;gap:20px;margin-bottom:16px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" name="isManual"
+                 ${isEdit && product.isManual ? 'checked' : ''}
+                 style="width:18px;height:18px;">
+          <span>منتج يدوي</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" name="isActive"
+                 ${!isEdit || product.isActive ? 'checked' : ''}
+                 style="width:18px;height:18px;">
+          <span>نشط</span>
+        </label>
+      </div>
+
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-floppy"></i>
+        ${isEdit ? 'حفظ التعديلات' : 'إضافة المنتج'}
+      </button>
+    </form>
+  </div>
+</div>
+`;
+%>
+<%- include('layout', { body: pageBody }) %>

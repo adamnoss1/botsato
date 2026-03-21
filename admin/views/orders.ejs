@@ -1,0 +1,77 @@
+<%
+const statusColor = { PENDING:'badge-warning', PROCESSING:'badge-info', COMPLETED:'badge-success', PARTIAL:'badge-warning', CANCELLED:'badge-danger', FAILED:'badge-danger' };
+
+const pageBody = `
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+  <h2 style="font-size:1.1rem;">الطلبات التلقائية (${total})</h2>
+  <a href="/admin/orders/manual" class="btn btn-outline">⚙️ الطلبات اليدوية</a>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-body">
+    <form method="GET" style="display:flex;gap:10px;flex-wrap:wrap;">
+      <input type="text" name="search" value="${search}" class="form-control"
+             placeholder="رقم الطلب" style="max-width:160px;">
+      <select name="status" class="form-control" style="max-width:180px;">
+        <option value="">جميع الحالات</option>
+        ${['PENDING','PROCESSING','COMPLETED','PARTIAL','CANCELLED','FAILED'].map(s =>
+          `<option value="${s}" ${currentStatus===s?'selected':''}>${s}</option>`
+        ).join('')}
+      </select>
+      <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i> بحث</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>Satofill ID</th><th>المستخدم</th><th>الخدمة</th>
+          <th>الكمية</th><th>الإجمالي</th><th>الحالة</th><th>التاريخ</th><th>تحديث</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${orders.map(o => `
+        <tr>
+          <td>${o.id}</td>
+          <td><code style="font-size:0.75rem;">${o.satofillOrderId || '—'}</code></td>
+          <td><a href="/admin/users/${o.userId}/edit" style="text-decoration:none;">${o.user?.firstName||'—'}</a></td>
+          <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            ${o.product?.name||'—'}
+          </td>
+          <td>${o.quantity}</td>
+          <td>${parseFloat(o.totalPrice).toFixed(2)}$</td>
+          <td><span class="badge ${statusColor[o.status]}">${o.status}</span></td>
+          <td style="font-size:0.8rem;">${new Date(o.createdAt).toLocaleDateString('ar')}</td>
+          <td>
+            <form action="/admin/orders/${o.id}/status" method="POST" style="display:flex;gap:4px;">
+              <input type="hidden" name="_csrf" value="${csrfToken}">
+              <select name="status" class="form-control" style="padding:4px 8px;font-size:0.8rem;">
+                ${['PENDING','PROCESSING','COMPLETED','PARTIAL','CANCELLED','FAILED'].map(s =>
+                  `<option value="${s}" ${o.status===s?'selected':''}>${s}</option>`
+                ).join('')}
+              </select>
+              <button class="btn btn-sm btn-primary">
+                <i class="bi bi-check"></i>
+              </button>
+            </form>
+          </td>
+        </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+  ${pages > 1 ? `
+  <div class="card-body">
+    <div class="pagination">
+      ${page > 1 ? `<a href="?page=${page-1}&status=${currentStatus}">◀️</a>` : ''}
+      <span class="current">${page} / ${pages}</span>
+      ${page < pages ? `<a href="?page=${page+1}&status=${currentStatus}">▶️</a>` : ''}
+    </div>
+  </div>` : ''}
+</div>
+`;
+%>
+<%- include('layout', { body: pageBody }) %>

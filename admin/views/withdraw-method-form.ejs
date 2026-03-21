@@ -1,0 +1,62 @@
+<%
+const isEdit  = method !== null;
+const pageBody = `
+<div style="margin-bottom:16px;">
+  <a href="/admin/withdraw-methods" class="btn btn-outline btn-sm">
+    <i class="bi bi-arrow-right"></i> رجوع
+  </a>
+</div>
+<div class="card" style="max-width:600px;">
+  <div class="card-header">${isEdit ? '✏️ تعديل طريقة سحب' : '➕ إضافة طريقة سحب'}</div>
+  <div class="card-body">
+    <form action="${isEdit ? '/admin/withdraw-methods/'+method.id : '/admin/withdraw-methods'}" method="POST">
+      <input type="hidden" name="_csrf" value="${csrfToken}">
+      <div class="form-group">
+        <label class="form-label">الاسم *</label>
+        <input type="text" name="name" class="form-control" required
+               value="${isEdit ? method.name : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">الاسم بالعربي</label>
+        <input type="text" name="nameAr" class="form-control"
+               value="${isEdit && method.nameAr ? method.nameAr : ''}">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-group">
+          <label class="form-label">الحد الأدنى ($) *</label>
+          <input type="number" step="0.01" name="minAmount" class="form-control" required
+                 value="${isEdit ? method.minAmount : '10'}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">الحد الأقصى ($) *</label>
+          <input type="number" step="0.01" name="maxAmount" class="form-control" required
+                 value="${isEdit ? method.maxAmount : '5000'}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">نوع الرسوم *</label>
+          <select name="feeType" class="form-control">
+            <option value="percentage" ${isEdit && method.feeType==='percentage'?'selected':''}>نسبة مئوية</option>
+            <option value="fixed"      ${isEdit && method.feeType==='fixed'     ?'selected':''}>ثابت</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">قيمة الرسوم *</label>
+          <input type="number" step="0.0001" name="feeValue" class="form-control" required
+                 value="${isEdit ? method.feeValue : '0.02'}">
+          <small style="color:#6b7280;">نسبة: 0.02 = 2% | ثابت: بالدولار</small>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">الوصف</label>
+        <input type="text" name="description" class="form-control"
+               value="${isEdit && method.description ? method.description : ''}">
+      </div>
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-floppy"></i> ${isEdit ? 'حفظ' : 'إضافة'}
+      </button>
+    </form>
+  </div>
+</div>
+`;
+%>
+<%- include('layout', { body: pageBody }) %>

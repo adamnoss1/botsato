@@ -1,0 +1,67 @@
+<%
+const pageBody = `
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+  <h2 style="font-size:1.1rem;">النسخ الاحتياطية</h2>
+  <form action="/admin/backup/create" method="POST">
+    <input type="hidden" name="_csrf" value="${csrfToken}">
+    <button type="submit" class="btn btn-primary" onclick="return confirm('إنشاء نسخة احتياطية الآن؟')">
+      <i class="bi bi-cloud-plus"></i> إنشاء نسخة الآن
+    </button>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-header">📁 النسخ الاحتياطية المتاحة</div>
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th>اسم الملف</th><th>الحجم</th><th>تاريخ الإنشاء</th><th>إجراء</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${backups.length === 0 ? `
+        <tr>
+          <td colspan="4" style="text-align:center;color:#6b7280;padding:30px;">
+            لا توجد نسخ احتياطية بعد
+          </td>
+        </tr>` :
+        backups.map(b => `
+        <tr>
+          <td>
+            <i class="bi bi-file-earmark-zip" style="color:#4f46e5;"></i>
+            <code style="margin-right:6px;">${b.filename}</code>
+          </td>
+          <td>${b.sizeKb} KB</td>
+          <td>${new Date(b.createdAt).toLocaleString('ar')}</td>
+          <td style="display:flex;gap:6px;">
+            <a href="/admin/backup/download/${b.filename}" class="btn btn-sm btn-success">
+              <i class="bi bi-download"></i> تنزيل
+            </a>
+            <form action="/admin/backup/delete/${b.filename}" method="POST">
+              <input type="hidden" name="_csrf" value="${csrfToken}">
+              <button class="btn btn-sm btn-danger" onclick="return confirm('حذف هذه النسخة؟')">
+                <i class="bi bi-trash"></i>
+              </button>
+            </form>
+          </td>
+        </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="margin-top:20px;">
+  <div class="card-body">
+    <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:10px;">ℹ️ معلومات</h3>
+    <p style="font-size:0.85rem;color:#6b7280;">
+      • يتم إنشاء نسخة احتياطية تلقائياً كل يوم الساعة 3:00 صباحاً<br>
+      • يتم الاحتفاظ بآخر 7 نسخ احتياطية فقط<br>
+      • النسخ بصيغة SQL (pg_dump) أو JSON عند عدم توفر pg_dump
+    </p>
+  </div>
+</div>
+`;
+%>
+<%- include('layout', { body: pageBody }) %>

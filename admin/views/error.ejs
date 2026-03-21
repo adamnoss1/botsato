@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title><%= title %></title>
+  <link rel="stylesheet" href="/public/css/admin.css">
+  <style>
+    body { display:flex; align-items:center; justify-content:center; min-height:100vh; }
+    .error-box { text-align:center; padding:40px; }
+    .error-box h1 { font-size:4rem; color:#ef4444; margin-bottom:10px; }
+  </style>
+</head>
+<body>
+  <div class="error-box">
+    <h1>⚠️</h1>
+    <h2><%= title %></h2>
+    <p style="color:#6b7280;margin:16px 0;"><%= message %></p>
+    <a href="/admin/dashboard" class="btn btn-primary">العودة للرئيسية</a>
+  </div>
+</body>
+</html>

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %> | لوحة التحكم</title>
+  <link rel="stylesheet" href="/public/css/admin.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+</head>
+<body>
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <i class="bi bi-robot"></i> لوحة التحكم
+    </div>
+    <nav class="sidebar-nav">
+      <a href="/admin/dashboard"       class="<%= title.includes('لوحة') ? 'active' : '' %>">
+        <i class="bi bi-speedometer2"></i> لوحة التحكم
+      </a>
+      <a href="/admin/users"           class="<%= title.includes('مستخدم') ? 'active' : '' %>">
+        <i class="bi bi-people"></i> المستخدمون
+      </a>
+      <a href="/admin/deposits"        class="<%= title.includes('إيداع') ? 'active' : '' %>">
+        <i class="bi bi-arrow-down-circle"></i> الإيداعات
+      </a>
+      <a href="/admin/withdrawals"     class="<%= title.includes('سحب') ? 'active' : '' %>">
+        <i class="bi bi-arrow-up-circle"></i> السحوبات
+      </a>
+      <a href="/admin/orders"          class="<%= title.includes('تلقائي') ? 'active' : '' %>">
+        <i class="bi bi-lightning"></i> الطلبات التلقائية
+      </a>
+      <a href="/admin/orders/manual"   class="<%= title.includes('يدوي') ? 'active' : '' %>">
+        <i class="bi bi-gear"></i> الطلبات اليدوية
+      </a>
+      <a href="/admin/products"        class="<%= title.includes('منتج') ? 'active' : '' %>">
+        <i class="bi bi-box-seam"></i> المنتجات
+      </a>
+      <a href="/admin/deposit-methods" class="<%= title.includes('طرق الإيداع') ? 'active' : '' %>">
+        <i class="bi bi-credit-card"></i> طرق الإيداع
+      </a>
+      <a href="/admin/withdraw-methods" class="<%= title.includes('طرق السحب') ? 'active' : '' %>">
+        <i class="bi bi-wallet2"></i> طرق السحب
+      </a>
+      <a href="/admin/broadcast"       class="<%= title.includes('إعلان') ? 'active' : '' %>">
+        <i class="bi bi-megaphone"></i> الإعلانات
+      </a>
+      <a href="/admin/settings"        class="<%= title.includes('إعداد') ? 'active' : '' %>">
+        <i class="bi bi-sliders"></i> الإعدادات
+      </a>
+      <% if (admin && admin.isSuperAdmin) { %>
+      <a href="/admin/admins"          class="<%= title.includes('مدير') ? 'active' : '' %>">
+        <i class="bi bi-shield-lock"></i> المديرون
+      </a>
+      <% } %>
+      <a href="/admin/audit-logs"      class="<%= title.includes('سجل') ? 'active' : '' %>">
+        <i class="bi bi-journal-text"></i> سجل العمليات
+      </a>
+      <% if (admin && admin.isSuperAdmin) { %>
+      <a href="/admin/backup"          class="<%= title.includes('احتياطي') ? 'active' : '' %>">
+        <i class="bi bi-cloud-download"></i> النسخ الاحتياطية
+      </a>
+      <% } %>
+    </nav>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <div class="main-content">
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button onclick="document.getElementById('sidebar').classList.toggle('open')"
+                style="background:none;border:none;cursor:pointer;font-size:1.3rem;">
+          <i class="bi bi-list"></i>
+        </button>
+        <h1 style="font-size:1rem;font-weight:600;"><%= title %></h1>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="font-size:0.85rem;color:#6b7280;">
+          <i class="bi bi-person-circle"></i> <%= admin ? admin.username : '' %>
+        </span>
+        <form action="/admin/logout" method="POST" style="margin:0;">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <button type="submit" class="btn btn-sm btn-outline">
+            <i class="bi bi-box-arrow-right"></i> خروج
+          </button>
+        </form>
+      </div>
+    </header>
+
+    <!-- PAGE CONTENT -->
+    <main class="page-content">
+      <% if (success) { %>
+        <div class="alert alert-success">
+          <i class="bi bi-check-circle"></i> <%= success %>
+        </div>
+      <% } %>
+      <% if (error) { %>
+        <div class="alert alert-danger">
+          <i class="bi bi-exclamation-circle"></i> <%= error %>
+        </div>
+      <% } %>
+
+      <%- body %>
+    </main>
+  </div>
+</div>
+
+<script>
+  // Auto-hide alerts after 4 seconds
+  setTimeout(() => {
+    document.querySelectorAll('.alert').forEach(el => {
+      el.style.transition = 'opacity 0.5s';
+      el.style.opacity = '0';
+      setTimeout(() => el.remove(), 500);
+    });
+  }, 4000);
+</script>
+</body>
+</html>

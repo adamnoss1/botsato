@@ -1,0 +1,25 @@
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <i class="bi bi-robot"></i> لوحة التحكم
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/admin/dashboard"><i class="bi bi-speedometer2"></i> لوحة التحكم</a>
+    <a href="/admin/users"><i class="bi bi-people"></i> المستخدمون</a>
+    <a href="/admin/deposits"><i class="bi bi-arrow-down-circle"></i> الإيداعات</a>
+    <a href="/admin/withdrawals"><i class="bi bi-arrow-up-circle"></i> السحوبات</a>
+    <a href="/admin/orders"><i class="bi bi-lightning"></i> الطلبات التلقائية</a>
+    <a href="/admin/orders/manual"><i class="bi bi-gear"></i> الطلبات اليدوية</a>
+    <a href="/admin/products"><i class="bi bi-box-seam"></i> المنتجات</a>
+    <a href="/admin/deposit-methods"><i class="bi bi-credit-card"></i> طرق الإيداع</a>
+    <a href="/admin/withdraw-methods"><i class="bi bi-wallet2"></i> طرق السحب</a>
+    <a href="/admin/broadcast"><i class="bi bi-megaphone"></i> الإعلانات</a>
+    <a href="/admin/settings"><i class="bi bi-sliders"></i> الإعدادات</a>
+    <% if (admin && admin.isSuperAdmin) { %>
+    <a href="/admin/admins"><i class="bi bi-shield-lock"></i> المديرون</a>
+    <% } %>
+    <a href="/admin/audit-logs"><i class="bi bi-journal-text"></i> سجل العمليات</a>
+    <% if (admin && admin.isSuperAdmin) { %>
+    <a href="/admin/backup"><i class="bi bi-cloud-download"></i> النسخ الاحتياطية</a>
+    <% } %>
+  </nav>
+</aside>

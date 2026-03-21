@@ -1,0 +1,151 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+
+# Prisma
+prisma/migrations/
+
+# Backups
+backups/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Build
+dist/
+build/
+```
+
+---
+
+## 9. تعليمات النشر الكاملة خطوة بخطوة
+```
+════════════════════════════════════════════════════
+   دليل النشر الكامل على Railway
+════════════════════════════════════════════════════
+
+الخطوة 1: إنشاء بوت Telegram
+─────────────────────────────
+1. افتح @BotFather على Telegram
+2. أرسل /newbot
+3. اختر اسماً للبوت
+4. احفظ الـ BOT_TOKEN
+
+الخطوة 2: الحصول على مفتاح Satofill
+──────────────────────────────────────
+1. سجل في satofill.com
+2. اذهب إلى API Settings
+3. انسخ الـ API Key
+
+الخطوة 3: إعداد Railway
+────────────────────────
+1. اذهب إلى railway.app
+2. سجل بحساب GitHub
+3. اضغط New Project
+4. اختر Deploy from GitHub repo
+5. اربط مستودع GitHub الخاص بالمشروع
+
+الخطوة 4: إضافة PostgreSQL
+────────────────────────────
+1. في مشروع Railway اضغط + Add Service
+2. اختر Database → PostgreSQL
+3. انتظر حتى تُنشأ قاعدة البيانات
+4. DATABASE_URL سيُضاف تلقائياً
+
+الخطوة 5: إضافة متغيرات البيئة
+─────────────────────────────────
+في لوحة Railway → Variables أضف:
+
+BOT_TOKEN          = [من BotFather]
+ADMIN_PASSWORD     = [كلمة مرور قوية]
+ADMIN_USERNAME     = admin
+SATOFILL_API_KEY   = [من Satofill]
+SESSION_SECRET     = [نص عشوائي 64 حرف]
+EXCHANGE_RATE      = 3.75
+PROFIT_MARGIN      = 0.20
+ADMIN_TELEGRAM_IDS = [Telegram ID الخاص بك]
+BOT_USERNAME       = [اسم البوت بدون @]
+SUPPORT_CHANNEL_ID = [ID قناة الدعم]
+NOTIFICATION_CHANNEL_ID = [ID قناة الإشعارات]
+REQUIRED_CHANNEL_ID     = [ID قناة التحقق]
+REQUIRED_CHANNEL_USERNAME = [اسم القناة]
+NODE_ENV           = production
+APP_URL            = https://[your-app].railway.app
+
+الخطوة 6: النشر
+─────────────────
+Railway سينفذ تلقائياً:
+  ✅ npm install
+  ✅ npx prisma generate
+  ✅ npx prisma migrate deploy
+  ✅ npm start
+
+الخطوة 7: التحقق
+──────────────────
+1. اذهب للرابط المُوفَّر من Railway
+2. افتح /admin → تسجيل الدخول
+3. اختبر البوت على Telegram بإرسال /start
+
+════════════════════════════════════════════════════
+```
+
+---
+
+## 10. ملخص نهائي للمشروع الكامل
+```
+╔══════════════════════════════════════════════════════╗
+║         ✅ المشروع الكامل - ملخص الأقسام            ║
+╠══════════════════════════════════════════════════════╣
+║                                                      ║
+║  القسم 1: هيكل المشروع + package.json               ║
+║           + .env.example + railway.json              ║
+║           + prisma/schema.prisma (16 جدول)           ║
+║                                                      ║
+║  القسم 2: config/settings.js                        ║
+║           + src/app.js + src/server.js               ║
+║           + middleware/auth.js                       ║
+║           + middleware/rateLimit.js                  ║
+║           + public/css/admin.css                     ║
+║                                                      ║
+║  القسم 3: satofill/satofillClient.js                ║
+║           + 9 Services كاملة                         ║
+║                                                      ║
+║  القسم 4: bot/bot.js + bot/handlers.js              ║
+║           + bot/keyboards.js                         ║
+║                                                      ║
+║  القسم 5: jobs/orderSync.js                         ║
+║           + jobs/cacheRefresh.js                     ║
+║           + jobs/dailyStats.js                       ║
+║           + jobs/backupJob.js                        ║
+║                                                      ║
+║  القسم 6: admin/routes/index.js                     ║
+║           + 12 Controller كامل                       ║
+║                                                      ║
+║  القسم 7: 15 EJS View كاملة                         ║
+║                                                      ║
+║  القسم 8: ملفات متبقية + README                     ║
+║           + تعليمات النشر الكاملة                   ║
+║                                                      ║
+╠══════════════════════════════════════════════════════╣
+║  إجمالي الملفات:  ~55 ملف                           ║
+║  إجمالي الجداول:  16 جدول                           ║
+║  إجمالي الـ APIs: كل Satofill endpoints             ║
+║  جاهز للنشر:      Railway ✅                         ║
+╚══════════════════════════════════════════════════════╝
+
+للتشغيل الفوري:
+  npm install
+  npx prisma migrate deploy
+  npm start

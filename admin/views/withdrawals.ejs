@@ -1,0 +1,84 @@
+<%
+const statusMap   = { PENDING:'badge-warning', APPROVED:'badge-info', COMPLETED:'badge-success', REJECTED:'badge-danger' };
+const statusLabel = { PENDING:'معلق', APPROVED:'مقبول', COMPLETED:'مكتمل', REJECTED:'مرفوض' };
+
+const pageBody = `
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+  <h2 style="font-size:1.1rem;">السحوبات (${total})</h2>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-body">
+    <form method="GET" style="display:flex;gap:10px;">
+      <select name="status" class="form-control" style="max-width:180px;">
+        <option value="">جميع الحالات</option>
+        <option value="PENDING"   ${currentStatus==='PENDING'   ?'selected':''}>معلق</option>
+        <option value="APPROVED"  ${currentStatus==='APPROVED'  ?'selected':''}>مقبول</option>
+        <option value="COMPLETED" ${currentStatus==='COMPLETED' ?'selected':''}>مكتمل</option>
+        <option value="REJECTED"  ${currentStatus==='REJECTED'  ?'selected':''}>مرفوض</option>
+      </select>
+      <button type="submit" class="btn btn-primary"><i class="bi bi-filter"></i> تصفية</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>المستخدم</th><th>المبلغ</th><th>الرسوم</th><th>الصافي</th>
+          <th>الطريقة</th><th>معلومات الحساب</th><th>الحالة</th><th>التاريخ</th><th>إجراء</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${withdrawals.map(w => `
+        <tr>
+          <td>${w.id}</td>
+          <td>
+            <a href="/admin/users/${w.userId}/edit" style="text-decoration:none;font-weight:600;">
+              ${w.user?.firstName || '—'}
+            </a>
+          </td>
+          <td>${parseFloat(w.amount).toFixed(2)}$</td>
+          <td>${parseFloat(w.fee).toFixed(2)}$</td>
+          <td><strong>${parseFloat(w.netAmount).toFixed(2)}$</strong></td>
+          <td>${w.method?.name || '—'}</td>
+          <td><code style="font-size:0.75rem;">${w.accountInfo}</code></td>
+          <td><span class="badge ${statusMap[w.status]}">${statusLabel[w.status]}</span></td>
+          <td style="font-size:0.8rem;">${new Date(w.createdAt).toLocaleString('ar')}</td>
+          <td>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;">
+              ${w.status === 'PENDING' ? `
+              <form action="/admin/withdrawals/${w.id}/approve" method="POST">
+                <input type="hidden" name="_csrf" value="${csrfToken}">
+                <button class="btn btn-sm btn-primary" onclick="return confirm('قبول؟')">قبول</button>
+              </form>
+              <form action="/admin/withdrawals/${w.id}/reject" method="POST">
+                <input type="hidden" name="_csrf" value="${csrfToken}">
+                <button class="btn btn-sm btn-danger" onclick="return confirm('رفض؟')">رفض</button>
+              </form>` : ''}
+              ${w.status === 'APPROVED' ? `
+              <form action="/admin/withdrawals/${w.id}/complete" method="POST">
+                <input type="hidden" name="_csrf" value="${csrfToken}">
+                <button class="btn btn-sm btn-success" onclick="return confirm('إكمال؟')">إكمال</button>
+              </form>` : ''}
+            </div>
+          </td>
+        </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+  ${pages > 1 ? `
+  <div class="card-body">
+    <div class="pagination">
+      ${page > 1 ? `<a href="?page=${page-1}&status=${currentStatus}">◀️</a>` : ''}
+      <span class="current">${page} / ${pages}</span>
+      ${page < pages ? `<a href="?page=${page+1}&status=${currentStatus}">▶️</a>` : ''}
+    </div>
+  </div>` : ''}
+</div>
+`;
+%>
+<%- include('layout', { body: pageBody }) %>

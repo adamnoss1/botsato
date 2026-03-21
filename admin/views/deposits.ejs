@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>الإيداعات</title>
+  <link rel="stylesheet" href="/public/css/admin.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+</head>
+<body>
+<%- include('partials/sidebar') %>
+<div class="main-content">
+  <%- include('partials/topbar', { title: 'الإيداعات' }) %>
+  <main class="page-content">
+    <%- include('partials/alerts') %>
+
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-body">
+        <form method="GET" style="display:flex;gap:10px;">
+          <select name="status" class="form-control" style="max-width:180px;">
+            <option value="">جميع الحالات</option>
+            <option value="PENDING"  <%= currentStatus==='PENDING'  ? 'selected':'' %>>معلق</option>
+            <option value="APPROVED" <%= currentStatus==='APPROVED' ? 'selected':'' %>>مقبول</option>
+            <option value="REJECTED" <%= currentStatus==='REJECTED' ? 'selected':'' %>>مرفوض</option>
+          </select>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-filter"></i> تصفية
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>المستخدم</th><th>المبلغ</th><th>بالدولار</th>
+              <th>الطريقة</th><th>رقم المعاملة</th><th>الحالة</th><th>التاريخ</th><th>إجراء</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% deposits.forEach(function(d) { %>
+            <tr>
+              <td><%= d.id %></td>
+              <td>
+                <a href="/admin/users/<%= d.userId %>/edit" style="text-decoration:none;font-weight:600;">
+                  <%= d.user ? d.user.firstName : '—' %>
+                </a>
+              </td>
+              <td><%= parseFloat(d.amountLocal).toFixed(2) %></td>
+              <td><strong><%= parseFloat(d.amountUsd).toFixed(2) %>$</strong></td>
+              <td><%= d.method ? d.method.name : '—' %></td>
+              <td><code style="font-size:0.75rem;"><%= d.transactionId %></code></td>
+              <td>
+                <span class="badge
+                  <% if (d.status==='APPROVED') { %>badge-success
+                  <% } else if (d.status==='REJECTED') { %>badge-danger
+                  <% } else { %>badge-warning<% } %>">
+                  <%= d.status === 'PENDING' ? 'معلق' : d.status === 'APPROVED' ? 'مقبول' : 'مرفوض' %>
+                </span>
+              </td>
+              <td style="font-size:0.8rem;"><%= new Date(d.createdAt).toLocaleString('ar') %></td>
+              <td>
+                <% if (d.status === 'PENDING') { %>
+                <div style="display:flex;gap:4px;">
+                  <form action="/admin/deposits/<%= d.id %>/approve" method="POST">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button class="btn btn-sm btn-success"
+                            onclick="return confirm('قبول هذا الإيداع؟')">
+                      <i class="bi bi-check-lg"></i>
+                    </button>
+                  </form>
+                  <form action="/admin/deposits/<%= d.id %>/reject" method="POST"
+                        style="display:flex;gap:4px;">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="text" name="note" class="form-control"
+                           style="width:90px;padding:4px 8px;font-size:0.8rem;" placeholder="سبب">
+                    <button class="btn btn-sm btn-danger"
+                            onclick="return confirm('رفض هذا الإيداع؟')">
+                      <i class="bi bi-x-lg"></i>
+                    </button>
+                  </form>
+                </div>
+                <% } else { %>—<% } %>
+              </td>
+            </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+
+      <% if (pages > 1) { %>
+      <div class="card-body">
+        <div class="pagination">
+          <% if (page > 1) { %>
+            <a href="?page=<%= page-1 %>&status=<%= currentStatus %>">◀️</a>
+          <% } %>
+          <span class="current"><%= page %> / <%= pages %></span>
+          <% if (page < pages) { %>
+            <a href="?page=<%= page+1 %>&status=<%= currentStatus %>">▶️</a>
+          <% } %>
+        </div>
+      </div>
+      <% } %>
+    </div>
+  </main>
+</div>
+</body>
+</html>

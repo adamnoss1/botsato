@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>الإعدادات</title>
+  <link rel="stylesheet" href="/public/css/admin.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+</head>
+<body>
+<%- include('partials/sidebar') %>
+<div class="main-content">
+  <%- include('partials/topbar', { title: 'الإعدادات' }) %>
+  <main class="page-content">
+    <%- include('partials/alerts') %>
+
+    <div class="card">
+      <div class="card-header">⚙️ إعدادات النظام</div>
+      <div class="card-body">
+        <form action="/admin/settings" method="POST">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+
+            <div>
+              <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;color:#4f46e5;">💱 الأسعار</h3>
+              <div class="form-group">
+                <label class="form-label">سعر الصرف (1$ = ؟)</label>
+                <input type="number" step="0.01" name="exchange_rate"
+                       value="<%= settings.exchange_rate || '3.75' %>" class="form-control">
+              </div>
+              <div class="form-group">
+                <label class="form-label">هامش الربح (0.20 = 20%)</label>
+                <input type="number" step="0.01" name="profit_margin"
+                       value="<%= settings.profit_margin || '0.20' %>" class="form-control">
+              </div>
+              <div class="form-group">
+                <label class="form-label">عمولة الإحالة (0.05 = 5%)</label>
+                <input type="number" step="0.01" name="referral_commission"
+                       value="<%= settings.referral_commission || '0.05' %>" class="form-control">
+              </div>
+            </div>
+
+            <div>
+              <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;color:#4f46e5;">📊 الحدود</h3>
+              <div class="form-group">
+                <label class="form-label">حد الإيداع الأدنى ($)</label>
+                <input type="number" step="0.01" name="min_deposit"
+                       value="<%= settings.min_deposit || '10' %>" class="form-control">
+              </div>
+              <div class="form-group">
+                <label class="form-label">حد الإيداع الأقصى ($)</label>
+                <input type="number" step="0.01" name="max_deposit"
+                       value="<%= settings.max_deposit || '10000' %>" class="form-control">
+              </div>
+              <div class="form-group">
+                <label class="form-label">حد السحب الأدنى ($)</label>
+                <input type="number" step="0.01" name="min_withdraw"
+                       value="<%= settings.min_withdraw || '10' %>" class="form-control">
+              </div>
+              <div class="form-group">
+                <label class="form-label">حد السحب الأقصى ($)</label>
+                <input type="number" step="0.01" name="max_withdraw"
+                       value="<%= settings.max_withdraw || '5000' %>" class="form-control">
+              </div>
+            </div>
+
+            <div>
+              <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;color:#4f46e5;">🏆 مستويات VIP</h3>
+              <div class="form-group">
+                <label class="form-label">🥉 برونزي - الحد ($)</label>
+                <input type="number" name="vip_bronze_threshold"
+                       value="<%= settings.vip_bronze_threshold || '100' %>" class="form-control">
+              </div>
+              <div class="form-group">
+                <label class="form-label">🥈 فضي - الحد ($)</label>
+                <input type="number" name="vip_silver_threshold"
+                       value="<%= settings.vip_silver_threshold || '500' %>" class="form-control">
+              </div>
+              <div class="form-group">
+                <label class="form-label">🥇 ذهبي - الحد ($)</label>
+                <input type="number" name="vip_gold_threshold"
+                       value="<%= settings.vip_gold_threshold || '2000' %>" class="form-control">
+              </div>
+            </div>
+
+            <div>
+              <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;color:#4f46e5;">💎 خصومات VIP</h3>
+              <div class="form-group">
+                <label class="form-label">🥉 خصم برونزي</label>
+                <input type="number" step="0.01" name="vip_bronze_discount"
+                       value="<%= settings.vip_bronze_discount || '0.02' %>" class="form-control">
+              </div>
+              <div class="form-group">
+                <label class="form-label">🥈 خصم فضي</label>
+                <input type="number" step="0.01" name="vip_silver_discount"
+                       value="<%= settings.vip_silver_discount || '0.05' %>" class="form-control">
+              </div>
+              <div class="form-group">
+                <label class="form-label">🥇 خصم ذهبي</label>
+                <input type="number" step="0.01" name="vip_gold_discount"
+                       value="<%= settings.vip_gold_discount || '0.10' %>" class="form-control">
+              </div>
+            </div>
+
+            <div>
+              <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;color:#4f46e5;">🤖 إعدادات البوت</h3>
+              <div class="form-group">
+                <label class="form-label">اسم البوت</label>
+                <input type="text" name="bot_name"
+                       value="<%= settings.bot_name || '' %>" class="form-control">
+              </div>
+              <div class="form-group">
+                <label class="form-label">رسالة الترحيب</label>
+                <textarea name="welcome_message" class="form-control" rows="3"><%= settings.welcome_message || '' %></textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label">الحد الأدنى لرسائل الدعم</label>
+                <input type="number" name="support_min_length"
+                       value="<%= settings.support_min_length || '20' %>" class="form-control">
+              </div>
+            </div>
+
+            <div>
+              <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;color:#4f46e5;">🔧 النظام</h3>
+              <div class="form-group" style="display:flex;align-items:center;gap:12px;">
+                <input type="checkbox" name="maintenance_mode" id="maintenance_mode"
+                       <%= settings.maintenance_mode === 'true' ? 'checked' : '' %>
+                       style="width:20px;height:20px;cursor:pointer;">
+                <label for="maintenance_mode" style="cursor:pointer;font-weight:500;">
+                  🔧 وضع الصيانة
+                </label>
+              </div>
+              <div class="form-group" style="display:flex;align-items:center;gap:12px;margin-top:12px;">
+                <input type="checkbox" name="channel_verification" id="channel_verification"
+                       <%= settings.channel_verification === 'true' ? 'checked' : '' %>
+                       style="width:20px;height:20px;cursor:pointer;">
+                <label for="channel_verification" style="cursor:pointer;font-weight:500;">
+                  📢 التحقق من اشتراك القناة
+                </label>
+              </div>
+            </div>
+
+          </div>
+
+          <div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;">
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-floppy"></i> حفظ الإعدادات
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>

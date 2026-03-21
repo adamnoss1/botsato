@@ -1,0 +1,97 @@
+<%
+const pageBody = `
+<div style="margin-bottom:20px;">
+  <a href="/admin/users" class="btn btn-outline btn-sm">
+    <i class="bi bi-arrow-right"></i> رجوع
+  </a>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+
+  <!-- User Info -->
+  <div class="card">
+    <div class="card-header">👤 معلومات المستخدم</div>
+    <div class="card-body">
+      <table style="width:100%;font-size:0.9rem;">
+        <tr><td style="padding:8px 0;color:#6b7280;">الاسم</td>
+            <td><strong>${user.firstName} ${user.lastName || ''}</strong></td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;">المعرف</td>
+            <td>${user.username ? '@'+user.username : '—'}</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;">Telegram ID</td>
+            <td><code>${user.telegramId}</code></td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;">الرصيد</td>
+            <td><strong style="color:#10b981;">${parseFloat(user.balance).toFixed(2)}$</strong></td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;">إجمالي الإيداع</td>
+            <td>${parseFloat(user.totalDeposited).toFixed(2)}$</td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;">المستوى</td>
+            <td><span class="badge badge-warning">${user.vipLevel}</span></td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;">رمز الإحالة</td>
+            <td><code>${user.referralCode}</code></td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;">الحالة</td>
+            <td><span class="badge ${user.isBanned ? 'badge-danger' : 'badge-success'}">
+              ${user.isBanned ? 'محظور' : 'نشط'}</span></td></tr>
+        <tr><td style="padding:8px 0;color:#6b7280;">تاريخ التسجيل</td>
+            <td>${new Date(user.createdAt).toLocaleString('ar')}</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div style="display:flex;flex-direction:column;gap:16px;">
+
+    <!-- Adjust Balance -->
+    <div class="card">
+      <div class="card-header">💰 تعديل الرصيد</div>
+      <div class="card-body">
+        <form action="/admin/users/${user.id}/balance" method="POST">
+          <input type="hidden" name="_csrf" value="${csrfToken}">
+          <div class="form-group">
+            <label class="form-label">المبلغ (سالب للخصم)</label>
+            <input type="number" name="amount" step="0.01" class="form-control"
+                   placeholder="مثال: 10 أو -5" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">السبب</label>
+            <input type="text" name="description" class="form-control" placeholder="سبب التعديل">
+          </div>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-pencil-square"></i> تعديل الرصيد
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Ban / Unban -->
+    <div class="card">
+      <div class="card-header">🚫 إجراءات الحساب</div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:10px;">
+        ${!user.isBanned ? `
+        <form action="/admin/users/${user.id}/ban" method="POST" style="display:flex;gap:8px;">
+          <input type="hidden" name="_csrf" value="${csrfToken}">
+          <input type="text" name="reason" class="form-control" placeholder="سبب الحظر">
+          <button type="submit" class="btn btn-danger" onclick="return confirm('تأكيد الحظر؟')">
+            <i class="bi bi-ban"></i> حظر
+          </button>
+        </form>` : `
+        <form action="/admin/users/${user.id}/unban" method="POST">
+          <input type="hidden" name="_csrf" value="${csrfToken}">
+          <button type="submit" class="btn btn-success">
+            <i class="bi bi-check-circle"></i> رفع الحظر
+          </button>
+        </form>`}
+
+        <form action="/admin/users/${user.id}/referral" method="POST" style="display:flex;gap:8px;">
+          <input type="hidden" name="_csrf" value="${csrfToken}">
+          <input type="text" name="referralCode" class="form-control" placeholder="رمز إحالة جديد">
+          <button type="submit" class="btn btn-warning" onclick="return confirm('تغيير المُحيل؟')">
+            <i class="bi bi-people"></i> تغيير
+          </button>
+        </form>
+      </div>
+    </div>
+
+  </div>
+</div>
+`;
+%>
+<%- include('layout', { body: pageBody }) %>

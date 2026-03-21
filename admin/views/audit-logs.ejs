@@ -1,0 +1,51 @@
+<%
+const pageBody = `
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+  <h2 style="font-size:1.1rem;">سجل العمليات (${total})</h2>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-body">
+    <form method="GET" style="display:flex;gap:10px;">
+      <input type="text" name="action" value="${currentAction}" class="form-control"
+             placeholder="فلترة بالعملية" style="max-width:240px;">
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-filter"></i> فلترة
+      </button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr><th>#</th><th>المدير</th><th>العملية</th><th>النوع</th><th>ID</th><th>IP</th><th>التاريخ</th></tr>
+      </thead>
+      <tbody>
+        ${logs.map(l => `
+        <tr>
+          <td>${l.id}</td>
+          <td>${l.admin?.username || 'النظام'}</td>
+          <td><code style="background:#f1f5f9;padding:2px 8px;border-radius:4px;">${l.action}</code></td>
+          <td>${l.targetType || '—'}</td>
+          <td>${l.targetId || '—'}</td>
+          <td style="font-size:0.8rem;">${l.ipAddress || '—'}</td>
+          <td style="font-size:0.8rem;">${new Date(l.createdAt).toLocaleString('ar')}</td>
+        </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+  ${pages > 1 ? `
+  <div class="card-body">
+    <div class="pagination">
+      ${page > 1 ? `<a href="?page=${page-1}&action=${currentAction}">◀️</a>` : ''}
+      <span class="current">${page} / ${pages}</span>
+      ${page < pages ? `<a href="?page=${page+1}&action=${currentAction}">▶️</a>` : ''}
+    </div>
+  </div>` : ''}
+</div>
+`;
+%>
+<%- include('layout', { body: pageBody }) %>

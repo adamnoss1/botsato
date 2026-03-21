@@ -1,0 +1,418 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────
+
+enum VipLevel {
+  NORMAL
+  BRONZE
+  SILVER
+  GOLD
+}
+
+enum DepositStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum WithdrawStatus {
+  PENDING
+  APPROVED
+  COMPLETED
+  REJECTED
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  PARTIAL
+  CANCELLED
+  FAILED
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAW
+  ORDER
+  REFUND
+  TRANSFER_IN
+  TRANSFER_OUT
+  COMMISSION
+  ADJUSTMENT
+}
+
+enum SupportStatus {
+  OPEN
+  CLOSED
+}
+
+// ─────────────────────────────────────────
+// USERS
+// ─────────────────────────────────────────
+
+model User {
+  id              Int      @id @default(autoincrement())
+  telegramId      BigInt   @unique
+  username        String?
+  firstName       String
+  lastName        String?
+  email           String?
+  balance         Decimal  @default(0) @db.Decimal(18, 4)
+  totalDeposited  Decimal  @default(0) @db.Decimal(18, 4)
+  vipLevel        VipLevel @default(NORMAL)
+  referralCode    String   @unique
+  referredById    Int?
+  referredBy      User?    @relation("Referrals", fields: [referredById], references: [id])
+  referrals       User[]   @relation("Referrals")
+  isBanned        Boolean  @default(false)
+  banReason       String?
+  isActive        Boolean  @default(true)
+  lastSeenAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  deposits        Deposit[]
+  withdrawals     Withdrawal[]
+  orders          Order[]
+  manualOrders    ManualOrder[]
+  transactions    WalletTransaction[]
+  referralGiven   Referral[]  @relation("ReferralFrom")
+  referralEarned  Referral[]  @relation("ReferralTo")
+  supportMessages SupportMessage[]
+  transfersOut    WalletTransaction[] @relation("TransferOut")
+
+  @@index([telegramId])
+  @@index([referralCode])
+  @@index([referredById])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────
+// ADMINS
+// ─────────────────────────────────────────
+
+model Admin {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  telegramId   BigInt?
+  isSuperAdmin Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  failedLogins Int      @default(0)
+  lockedUntil  DateTime?
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  auditLogs    AuditLog[]
+
+  @@map("admins")
+}
+
+// ─────────────────────────────────────────
+// WALLET TRANSACTIONS
+// ─────────────────────────────────────────
+
+model WalletTransaction {
+  id          Int             @id @default(autoincrement())
+  userId      Int
+  user        User            @relation(fields: [userId], references: [id])
+  type        TransactionType
+  amount      Decimal         @db.Decimal(18, 4)
+  balanceBefore Decimal       @db.Decimal(18, 4)
+  balanceAfter  Decimal       @db.Decimal(18, 4)
+  description String?
+  refId       String?
+  transferToId Int?
+  transferTo  User?           @relation("TransferOut", fields: [transferToId], references: [id])
+  createdAt   DateTime        @default(now())
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("wallet_transactions")
+}
+
+// ─────────────────────────────────────────
+// DEPOSITS
+// ─────────────────────────────────────────
+
+model DepositMethod {
+  id           Int      @id @default(autoincrement())
+  name         String
+  nameAr       String?
+  description  String?
+  minAmount    Decimal  @db.Decimal(18, 4)
+  maxAmount    Decimal  @db.Decimal(18, 4)
+  exchangeRate Decimal  @db.Decimal(18, 6)
+  instructions String?
+  isActive     Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  deposits     Deposit[]
+
+  @@map("deposit_methods")
+}
+
+model Deposit {
+  id              Int           @id @default(autoincrement())
+  userId          Int
+  user            User          @relation(fields: [userId], references: [id])
+  methodId        Int
+  method          DepositMethod @relation(fields: [methodId], references: [id])
+  amountLocal     Decimal       @db.Decimal(18, 4)
+  amountUsd       Decimal       @db.Decimal(18, 4)
+  exchangeRate    Decimal       @db.Decimal(18, 6)
+  transactionId   String
+  status          DepositStatus @default(PENDING)
+  adminNote       String?
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  notifiedAdmins  Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([transactionId, methodId])
+  @@index([userId])
+  @@index([status])
+  @@map("deposits")
+}
+
+// ─────────────────────────────────────────
+// WITHDRAWALS
+// ─────────────────────────────────────────
+
+model WithdrawMethod {
+  id          Int      @id @default(autoincrement())
+  name        String
+  nameAr      String?
+  description String?
+  minAmount   Decimal  @db.Decimal(18, 4)
+  maxAmount   Decimal  @db.Decimal(18, 4)
+  feeType     String   @default("percentage")
+  feeValue    Decimal  @db.Decimal(10, 4)
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  withdrawals Withdrawal[]
+
+  @@map("withdraw_methods")
+}
+
+model Withdrawal {
+  id           Int            @id @default(autoincrement())
+  userId       Int
+  user         User           @relation(fields: [userId], references: [id])
+  methodId     Int
+  method       WithdrawMethod @relation(fields: [methodId], references: [id])
+  amount       Decimal        @db.Decimal(18, 4)
+  fee          Decimal        @db.Decimal(18, 4)
+  netAmount    Decimal        @db.Decimal(18, 4)
+  accountInfo  String
+  status       WithdrawStatus @default(PENDING)
+  adminNote    String?
+  approvedAt   DateTime?
+  completedAt  DateTime?
+  rejectedAt   DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("withdrawals")
+}
+
+// ─────────────────────────────────────────
+// PRODUCTS
+// ─────────────────────────────────────────
+
+model ProductGroup {
+  id          Int       @id @default(autoincrement())
+  name        String
+  nameAr      String?
+  satofillId  String?
+  isActive    Boolean   @default(true)
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  products    Product[]
+
+  @@map("product_groups")
+}
+
+model Product {
+  id            Int          @id @default(autoincrement())
+  groupId       Int
+  group         ProductGroup @relation(fields: [groupId], references: [id])
+  satofillId    String?      @unique
+  name          String
+  nameAr        String?
+  description   String?
+  priceUsd      Decimal      @db.Decimal(18, 6)
+  profitMargin  Decimal      @default(0.20) @db.Decimal(5, 4)
+  minQuantity   Int          @default(100)
+  maxQuantity   Int          @default(100000)
+  isManual      Boolean      @default(false)
+  isActive      Boolean      @default(true)
+  sortOrder     Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  orders        Order[]
+  manualOrders  ManualOrder[]
+
+  @@index([groupId])
+  @@index([satofillId])
+  @@map("products")
+}
+
+// ─────────────────────────────────────────
+// ORDERS
+// ─────────────────────────────────────────
+
+model Order {
+  id              Int         @id @default(autoincrement())
+  userId          Int
+  user            User        @relation(fields: [userId], references: [id])
+  productId       Int
+  product         Product     @relation(fields: [productId], references: [id])
+  satofillOrderId String?
+  quantity        Int
+  link            String
+  pricePerUnit    Decimal     @db.Decimal(18, 6)
+  totalPrice      Decimal     @db.Decimal(18, 4)
+  status          OrderStatus @default(PENDING)
+  startCount      Int?
+  remains         Int?
+  adminNote       String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  referralCommissions Referral[]
+
+  @@index([userId])
+  @@index([satofillOrderId])
+  @@index([status])
+  @@map("orders")
+}
+
+model ManualOrder {
+  id          Int         @id @default(autoincrement())
+  userId      Int
+  user        User        @relation(fields: [userId], references: [id])
+  productId   Int
+  product     Product     @relation(fields: [productId], references: [id])
+  quantity    Int
+  accountInfo String
+  totalPrice  Decimal     @db.Decimal(18, 4)
+  status      OrderStatus @default(PENDING)
+  adminNote   String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("manual_orders")
+}
+
+// ─────────────────────────────────────────
+// REFERRALS
+// ─────────────────────────────────────────
+
+model Referral {
+  id           Int      @id @default(autoincrement())
+  fromUserId   Int
+  fromUser     User     @relation("ReferralFrom", fields: [fromUserId], references: [id])
+  toUserId     Int
+  toUser       User     @relation("ReferralTo", fields: [toUserId], references: [id])
+  orderId      Int?
+  order        Order?   @relation(fields: [orderId], references: [id])
+  commission   Decimal  @db.Decimal(18, 4)
+  createdAt    DateTime @default(now())
+
+  @@index([fromUserId])
+  @@index([toUserId])
+  @@map("referrals")
+}
+
+// ─────────────────────────────────────────
+// SETTINGS
+// ─────────────────────────────────────────
+
+model Setting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// ─────────────────────────────────────────
+// SUPPORT MESSAGES
+// ─────────────────────────────────────────
+
+model SupportMessage {
+  id        Int           @id @default(autoincrement())
+  userId    Int
+  user      User          @relation(fields: [userId], references: [id])
+  message   String
+  status    SupportStatus @default(OPEN)
+  reply     String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("support_messages")
+}
+
+// ─────────────────────────────────────────
+// AUDIT LOGS
+// ─────────────────────────────────────────
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  adminId   Int?
+  admin     Admin?   @relation(fields: [adminId], references: [id])
+  action    String
+  targetType String?
+  targetId  Int?
+  details   Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([adminId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+// ─────────────────────────────────────────
+// BROADCAST LOGS
+// ─────────────────────────────────────────
+
+model BroadcastLog {
+  id          Int      @id @default(autoincrement())
+  message     String
+  sentCount   Int      @default(0)
+  failedCount Int      @default(0)
+  sentBy      Int?
+  createdAt   DateTime @default(now())
+
+  @@map("broadcast_logs")
+}

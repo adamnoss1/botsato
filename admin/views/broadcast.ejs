@@ -1,0 +1,59 @@
+<%
+const pageBody = `
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+
+  <div class="card">
+    <div class="card-header">📢 إرسال إعلان جديد</div>
+    <div class="card-body">
+      <form action="/admin/broadcast" method="POST">
+        <input type="hidden" name="_csrf" value="${csrfToken}">
+        <div class="form-group">
+          <label class="form-label">نص الإعلان</label>
+          <textarea name="message" class="form-control" rows="6"
+                    placeholder="أدخل نص الإعلان..." required></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">صيغة النص</label>
+          <select name="parseMode" class="form-control">
+            <option value="markdown">Markdown</option>
+            <option value="html">HTML</option>
+          </select>
+        </div>
+        <div style="background:#fef3c7;border-radius:8px;padding:12px;margin-bottom:16px;font-size:0.85rem;">
+          ⚠️ سيتم إرسال الإعلان لجميع المستخدمين النشطين
+        </div>
+        <button type="submit" class="btn btn-primary"
+                onclick="return confirm('إرسال الإعلان لجميع المستخدمين؟')">
+          <i class="bi bi-send"></i> إرسال الإعلان
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">📋 سجل الإعلانات السابقة</div>
+    <div class="table-responsive">
+      <table>
+        <thead>
+          <tr><th>الرسالة</th><th>أُرسل</th><th>فشل</th><th>التاريخ</th></tr>
+        </thead>
+        <tbody>
+          ${logs.map(l => `
+          <tr>
+            <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+              ${l.message.substring(0, 50)}...
+            </td>
+            <td><span class="badge badge-success">${l.sentCount}</span></td>
+            <td><span class="badge badge-danger">${l.failedCount}</span></td>
+            <td style="font-size:0.8rem;">${new Date(l.createdAt).toLocaleString('ar')}</td>
+          </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+`;
+%>
+<%- include('layout', { body: pageBody }) %>

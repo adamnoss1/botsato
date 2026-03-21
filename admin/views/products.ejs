@@ -1,0 +1,84 @@
+<%
+const pageBody = `
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+  <h2 style="font-size:1.1rem;">المنتجات (${total})</h2>
+  <div style="display:flex;gap:8px;">
+    <form action="/admin/products/sync" method="POST">
+      <input type="hidden" name="_csrf" value="${csrfToken}">
+      <button type="submit" class="btn btn-outline" onclick="return confirm('مزامنة مع Satofill؟')">
+        <i class="bi bi-arrow-repeat"></i> مزامنة Satofill
+      </button>
+    </form>
+    <a href="/admin/products/create" class="btn btn-primary">
+      <i class="bi bi-plus-lg"></i> إضافة منتج
+    </a>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-body">
+    <form method="GET" style="display:flex;gap:10px;">
+      <input type="text" name="search" value="${search}" class="form-control"
+             placeholder="بحث بالاسم أو Satofill ID" style="max-width:300px;">
+      <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i> بحث</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>الاسم</th><th>الفئة</th><th>Satofill ID</th>
+          <th>السعر $</th><th>النوع</th><th>الحالة</th><th>إجراء</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${products.map(p => `
+        <tr>
+          <td>${p.id}</td>
+          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            ${p.name}
+          </td>
+          <td>${p.group?.name || '—'}</td>
+          <td><code style="font-size:0.75rem;">${p.satofillId || '—'}</code></td>
+          <td>${parseFloat(p.priceUsd).toFixed(6)}</td>
+          <td>
+            <span class="badge ${p.isManual ? 'badge-warning' : 'badge-info'}">
+              ${p.isManual ? 'يدوي' : 'تلقائي'}
+            </span>
+          </td>
+          <td>
+            <span class="badge ${p.isActive ? 'badge-success' : 'badge-danger'}">
+              ${p.isActive ? 'نشط' : 'معطل'}
+            </span>
+          </td>
+          <td>
+            <a href="/admin/products/${p.id}/edit" class="btn btn-sm btn-primary">
+              <i class="bi bi-pencil"></i>
+            </a>
+            <form action="/admin/products/${p.id}/delete" method="POST" style="display:inline;">
+              <input type="hidden" name="_csrf" value="${csrfToken}">
+              <button class="btn btn-sm btn-danger" onclick="return confirm('حذف المنتج؟')">
+                <i class="bi bi-trash"></i>
+              </button>
+            </form>
+          </td>
+        </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+  ${pages > 1 ? `
+  <div class="card-body">
+    <div class="pagination">
+      ${page > 1 ? `<a href="?page=${page-1}&search=${search}">◀️</a>` : ''}
+      <span class="current">${page} / ${pages}</span>
+      ${page < pages ? `<a href="?page=${page+1}&search=${search}">▶️</a>` : ''}
+    </div>
+  </div>` : ''}
+</div>
+`;
+%>
+<%- include('layout', { body: pageBody }) %>

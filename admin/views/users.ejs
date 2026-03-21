@@ -1,0 +1,81 @@
+<%
+const pageBody = `
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+  <h2 style="font-size:1.1rem;">المستخدمون (${total})</h2>
+</div>
+
+<div class="card" style="margin-bottom:20px;">
+  <div class="card-body">
+    <form method="GET" style="display:flex;gap:12px;flex-wrap:wrap;">
+      <input type="text" name="search" value="${search}" class="form-control"
+             placeholder="بحث بالاسم أو المعرف أو رمز الإحالة" style="max-width:300px;">
+      <select name="banned" class="form-control" style="max-width:160px;">
+        <option value="">الكل</option>
+        <option value="false" ${banned === 'false' ? 'selected' : ''}>نشط</option>
+        <option value="true"  ${banned === 'true'  ? 'selected' : ''}>محظور</option>
+      </select>
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-search"></i> بحث
+      </button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>الاسم</th><th>المعرف</th><th>الرصيد</th>
+          <th>المستوى</th><th>الطلبات</th><th>الإيداعات</th>
+          <th>الحالة</th><th>تاريخ التسجيل</th><th>إجراء</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${users.map(u => `
+        <tr>
+          <td>${u.id}</td>
+          <td>
+            <div style="font-weight:600;">${u.firstName} ${u.lastName || ''}</div>
+            ${u.username ? `<small style="color:#6b7280;">@${u.username}</small>` : ''}
+          </td>
+          <td><code>${u.telegramId}</code></td>
+          <td><strong>${parseFloat(u.balance).toFixed(2)}$</strong></td>
+          <td>
+            <span class="badge ${
+              u.vipLevel === 'GOLD'   ? 'badge-gold' :
+              u.vipLevel === 'SILVER' ? 'badge-secondary' :
+              u.vipLevel === 'BRONZE' ? 'badge-warning' : 'badge-secondary'
+            }">${u.vipLevel}</span>
+          </td>
+          <td>${u._count.orders}</td>
+          <td>${u._count.deposits}</td>
+          <td>
+            <span class="badge ${u.isBanned ? 'badge-danger' : 'badge-success'}">
+              ${u.isBanned ? 'محظور' : 'نشط'}
+            </span>
+          </td>
+          <td style="font-size:0.8rem;">${new Date(u.createdAt).toLocaleDateString('ar')}</td>
+          <td>
+            <a href="/admin/users/${u.id}/edit" class="btn btn-sm btn-primary">
+              <i class="bi bi-pencil"></i>
+            </a>
+          </td>
+        </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+
+  ${pages > 1 ? `
+  <div class="card-body">
+    <div class="pagination">
+      ${page > 1 ? `<a href="?page=${page-1}&search=${search}&banned=${banned}">◀️</a>` : ''}
+      <span class="current">${page} / ${pages}</span>
+      ${page < pages ? `<a href="?page=${page+1}&search=${search}&banned=${banned}">▶️</a>` : ''}
+    </div>
+  </div>` : ''}
+</div>
+`;
+%>
+<%- include('layout', { body: pageBody }) %>
