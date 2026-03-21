@@ -1,261 +1,304 @@
-// satofill/satofillClient.js
 const axios  = require('axios');
 const config = require('../config/settings');
 
-// ─────────────────────────────────────────
-// BASE URL الصحيح من توثيق Satofill
-// ─────────────────────────────────────────
 const BASE_URL = 'https://satofill.com/wp-json/mps/v1';
 
-// ─────────────────────────────────────────
-// AXIOS INSTANCE
-// Bearer Token authentication
-// ─────────────────────────────────────────
 const client = axios.create({
   baseURL: BASE_URL,
   timeout: 30000,
   headers: {
-    'Content-Type':  'application/json',
-    'Accept':        'application/json',
+    'Content-Type': 'application/json',
+    'Accept':       'application/json',
   },
 });
 
-// ─────────────────────────────────────────
-// REQUEST INTERCEPTOR — يضيف Bearer Token
-// ─────────────────────────────────────────
-client.interceptors.request.use((reqConfig) => {
-  const token = config.satofill.apiKey;
-  if (!token) throw new Error('SATOFILL_API_KEY is not configured');
-  reqConfig.headers['Authorization'] = `Bearer ${token}`;
+client.interceptors.request.use(function(reqConfig) {
+  var token = config.satofill.apiKey;
+  if (!token || token === 'your_satofill_api_key_here') {
+    throw new Error('SATOFILL_API_KEY not configured');
+  }
+  reqConfig.headers['Authorization'] = 'Bearer ' + token;
   return reqConfig;
 });
 
-// ─────────────────────────────────────────
-// RESPONSE INTERCEPTOR
-// ─────────────────────────────────────────
 client.interceptors.response.use(
-  (res) => res.data,
-  (err) => {
-    const status = err.response?.status;
-    const msg    = err.response?.data?.message
-                || err.response?.data?.error
-                || err.message
-                || 'Satofill API error';
+  function(res) { return res.data; },
+  function(err) {
+    var status = err.response ? err.response.status : null;
+    var body   = err.response ? err.response.data   : null;
+    var msg    = 'Satofill API error';
+    if (body && body.error && body.error.message) msg = body.error.message;
+    else if (body && body.error && body.error.code) msg = body.error.code;
+    else if (body && body.message) msg = body.message;
+    else if (err.message) msg = err.message;
 
     if (global.logger) {
-      global.logger.error(`[SATOFILL] HTTP ${status || '?'}: ${msg}`);
+      global.logger.error('[SATOFILL] HTTP ' + (status || '?') + ': ' + msg);
     }
-
-    // رسائل خطأ واضحة حسب كود الحالة
-    if (status === 401) throw new Error('مفتاح API غير صالح أو منتهي الصلاحية (401)');
-    if (status === 403) throw new Error('لا يوجد صلاحية الوصول (403)');
-    if (status === 404) throw new Error('المسار غير موجود (404)');
-    if (status === 429) throw new Error('تجاوز حد الطلبات، حاول لاحقاً (429)');
-
+    if (status === 401) throw new Error('API key invalid (401 Unauthorized)');
+    if (status === 403) throw new Error('Access forbidden (403): ' + msg);
+    if (status === 404) throw new Error('Not found (404)');
+    if (status === 429) throw new Error('Rate limit exceeded (429)');
     throw new Error(msg);
   }
 );
 
 // ─────────────────────────────────────────
-// GET ALL PRODUCTS/SERVICES
-// GET /wp-json/mps/v1/products
+// EXTRACT PRODUCTS
+// البنية: { success, data: { products: [...], total: N } }
+// ─────────────────────────────────────────
+function extractProducts(data) {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== 'object') return [];
+
+  // { success: true, data: { products: [...] } }
+  if (data.data && data.data.products && Array.isArray(data.data.products)) {
+    return data.data.products;
+  }
+  // { data: [...] }
+  if (data.data && Array.isArray(data.data)) return data.data;
+  // { products: [...] }
+  if (data.products && Array.isArray(data.products)) return data.products;
+
+  return [];
+}
+
+// ─────────────────────────────────────────
+// NORMALIZE SERVICE
+// ─────────────────────────────────────────
+function normalizeService(s) {
+  if (!s || typeof s !== 'object') return null;
+
+  var serviceId = s.id || s.service_id || '';
+  var name      = s.name || s.title    || '';
+
+  if (!serviceId || !name) return null;
+
+  // categories هي array: ["Games", "Pubg"]
+  var category = 'General';
+  if (Array.isArray(s.categories) && s.categories.length > 0) {
+    category = String(s.categories[0]).trim();
+  }
+
+  // custom_fields: حقول مطلوبة لإنشاء الطلب
+  var customFields = Array.isArray(s.custom_fields) ? s.custom_fields : [];
+
+  return {
+    service:      String(serviceId).trim(),
+    name:         String(name).trim(),
+    category:     category,
+    rate:         parseFloat(s.price || 0),
+    min:          parseInt(s.min_quantity || s.min || 1),
+    max:          parseInt(s.max_quantity || s.max || 100000),
+    available:    s.available !== false,
+    customFields: customFields,
+    thumbnail:    s.thumbnail || null,
+    description:  String(s.description || '').trim(),
+  };
+}
+
+// ─────────────────────────────────────────
+// GET ALL SERVICES
+// GET /products
 // ─────────────────────────────────────────
 async function getServices() {
   try {
-    if (!config.satofill.apiKey || config.satofill.apiKey === 'your_satofill_api_key_here') {
-      if (global.logger) global.logger.error('[SATOFILL] API key not configured');
-      return [];
-    }
-
-    const data = await client.get('/products');
+    var data = await client.get('/products');
 
     if (global.logger) {
-      global.logger.info(
-        `[SATOFILL] Products response — type: ${typeof data}, isArray: ${Array.isArray(data)}`
-      );
+      var rawStr = JSON.stringify(data) || '';
+      global.logger.info('[SATOFILL] Raw (300): ' + rawStr.substring(0, 300));
     }
 
-    // معالجة أشكال الاستجابة المحتملة
-    let services = [];
-
-    if (Array.isArray(data)) {
-      services = data;
-    } else if (data && typeof data === 'object') {
-      if (data.error || data.message) {
-        if (global.logger) global.logger.error(`[SATOFILL] API returned error: ${data.error || data.message}`);
-        return [];
-      }
-      // بعض APIs تغلف البيانات في data أو products أو items
-      services = data.data || data.products || data.items || data.result || [];
-      if (!Array.isArray(services)) services = Object.values(data);
-    }
-
-    // تصفية وتوحيد حقول الخدمات
-    const valid = services
-      .filter(s => s && typeof s === 'object')
-      .map(s => ({
-        // نعيّن الحقول بمرونة لأي تسمية تستخدمها Satofill
-        service:  String(s.id       ?? s.service    ?? s.service_id ?? '').trim(),
-        name:     String(s.name     ?? s.title      ?? s.label      ?? '').trim(),
-        category: String(s.category ?? s.type       ?? s.group      ?? 'General').trim(),
-        rate:     s.price     ?? s.rate      ?? s.cost       ?? s.price_per_1000 ?? 0,
-        min:      s.min       ?? s.min_order ?? s.minimum    ?? 100,
-        max:      s.max       ?? s.max_order ?? s.maximum    ?? 100000,
-        description: s.description ?? s.desc ?? '',
-      }))
-      .filter(s => s.service && s.name);
+    var rawList = extractProducts(data);
 
     if (global.logger) {
-      global.logger.info(`[SATOFILL] Total: ${services.length}, Valid: ${valid.length}`);
+      global.logger.info('[SATOFILL] Extracted: ' + rawList.length + ' products');
     }
 
-    return valid;
+    if (rawList.length === 0) return [];
+
+    var services = rawList.map(normalizeService).filter(Boolean);
+
+    if (global.logger) {
+      global.logger.info('[SATOFILL] Valid: ' + services.length);
+    }
+
+    return services;
 
   } catch (err) {
-    if (global.logger) global.logger.error(`[SATOFILL] getServices failed: ${err.message}`);
+    if (global.logger) global.logger.error('[SATOFILL] getServices: ' + err.message);
     return [];
   }
 }
 
 // ─────────────────────────────────────────
-// GET SINGLE PRODUCT
-// GET /wp-json/mps/v1/products/:id
-// ─────────────────────────────────────────
-async function getService(serviceId) {
-  try {
-    const data = await client.get(`/products/${serviceId}`);
-    return data;
-  } catch (err) {
-    if (global.logger) global.logger.error(`[SATOFILL] getService(${serviceId}) failed: ${err.message}`);
-    return null;
-  }
-}
-
-// ─────────────────────────────────────────
 // CREATE ORDER
-// POST /wp-json/mps/v1/orders
+// POST /orders
+// product_id: integer
+// quantity: integer
+// custom_fields: { key: value }
 // ─────────────────────────────────────────
-async function createOrder({ serviceId, quantity, link }) {
-  const data = await client.post('/orders', {
-    product_id: serviceId,   // أو service_id — نجرب الاثنين
-    quantity:   parseInt(quantity),
-    link,
-  });
+async function createOrder(params) {
+  var serviceId    = params.serviceId;
+  var quantity     = params.quantity;
+  var customFields = params.customFields || {};
 
+  // إذا أُرسل link نضعه في custom_fields تلقائياً
+  if (params.link && Object.keys(customFields).length === 0) {
+    customFields = { link: params.link, url: params.link };
+  }
+
+  var payload = {
+    product_id:    parseInt(serviceId),
+    quantity:      parseInt(quantity) || 1,
+    custom_fields: customFields,
+  };
+
+  if (global.logger) {
+    global.logger.info('[SATOFILL] createOrder payload: ' + JSON.stringify(payload));
+  }
+
+  var data = await client.post('/orders', payload);
+
+  if (global.logger) {
+    global.logger.info('[SATOFILL] createOrder response: ' + JSON.stringify(data).substring(0, 300));
+  }
+
+  // الرد: { success: true, data: { order_id, status, ... } }
   if (!data) throw new Error('Empty response from Satofill');
-  if (data.error || data.message?.includes('error')) {
-    throw new Error(data.error || data.message);
+
+  if (data.success === false) {
+    var errMsg = 'Order failed';
+    if (data.error && data.error.message) errMsg = data.error.message;
+    else if (data.error && data.error.code)  errMsg = data.error.code;
+    throw new Error(errMsg);
   }
 
-  // استخراج ID الطلب بمرونة
-  const orderId = data.order_id ?? data.id ?? data.order ?? data.data?.id;
+  var orderData = data.data || data;
+  var orderId   = orderData.order_id || orderData.id || orderData.order;
+
   if (!orderId) {
-    if (global.logger) {
-      global.logger.error(`[SATOFILL] createOrder response: ${JSON.stringify(data)}`);
-    }
-    throw new Error('Order ID missing from Satofill response');
+    throw new Error('Order ID missing. Response: ' + JSON.stringify(data).substring(0, 200));
   }
-
-  return { satofillOrderId: String(orderId) };
-}
-
-// ─────────────────────────────────────────
-// GET ORDER STATUS (single)
-// GET /wp-json/mps/v1/orders/:id
-// ─────────────────────────────────────────
-async function checkOrderStatus(satofillOrderId) {
-  const data = await client.get(`/orders/${satofillOrderId}`);
-
-  if (!data)      throw new Error('Empty response from Satofill');
-  if (data.error) throw new Error(data.error);
 
   return {
-    status:     data.status      ?? data.order_status ?? 'Pending',
-    startCount: data.start_count != null ? parseInt(data.start_count) : null,
-    remains:    data.remains     != null ? parseInt(data.remains)     : null,
-    charge:     data.charge      != null ? parseFloat(data.charge)    : null,
-    currency:   data.currency    ?? 'USD',
+    satofillOrderId: String(orderId),
+    status:          orderData.status || 'processing',
+    newBalance:      orderData.new_balance || null,
+    codes:           orderData.codes || [],
   };
 }
 
 // ─────────────────────────────────────────
-// MULTIPLE ORDERS STATUS
-// POST /wp-json/mps/v1/orders/status
+// CHECK ORDER STATUS
+// GET /orders/{id}
+// Statuses: processing, completed, rejected, cancelled, pending
+// ─────────────────────────────────────────
+async function checkOrderStatus(satofillOrderId) {
+  var data = await client.get('/orders/' + satofillOrderId);
+
+  if (!data) throw new Error('Empty response');
+
+  if (data.success === false) {
+    var errMsg = 'Status check failed';
+    if (data.error && data.error.message) errMsg = data.error.message;
+    throw new Error(errMsg);
+  }
+
+  var orderData = (data.data) ? data.data : data;
+
+  return {
+    status:              String(orderData.status || 'processing'),
+    orderId:             orderData.order_id    || null,
+    productId:           orderData.product_id  || null,
+    quantity:            orderData.quantity    || null,
+    total:               orderData.total       || null,
+    codes:               orderData.codes       || [],
+    subscriptionDetails: orderData.subscription_details || null,
+    createdAt:           orderData.created_at  || null,
+  };
+}
+
+// ─────────────────────────────────────────
+// CHECK MULTIPLE ORDERS
+// POST /orders/status
+// Body: { order_ids: [id1, id2, ...] }  ← order_ids وليس orders
 // ─────────────────────────────────────────
 async function checkMultipleOrders(satofillOrderIds) {
   if (!satofillOrderIds || satofillOrderIds.length === 0) return {};
-
   try {
-    const data = await client.post('/orders/status', {
-      orders: satofillOrderIds,
-    });
+    var ids  = satofillOrderIds.map(function(id) { return parseInt(id); });
+    var data = await client.post('/orders/status', { order_ids: ids });
+
+    if (data && data.data && data.data.orders) {
+      return data.data.orders;
+    }
     return data || {};
   } catch (err) {
-    if (global.logger) global.logger.error(`[SATOFILL] checkMultipleOrders: ${err.message}`);
+    if (global.logger) global.logger.error('[SATOFILL] checkMultipleOrders: ' + err.message);
     return {};
   }
 }
 
 // ─────────────────────────────────────────
 // GET BALANCE
-// GET /wp-json/mps/v1/balance
+// GET /balance
 // ─────────────────────────────────────────
 async function getBalance() {
   try {
-    const data = await client.get('/balance');
+    var data = await client.get('/balance');
+    var bal  = (data && data.data) ? data.data : data;
     return {
-      balance:  parseFloat(data.balance  ?? data.amount ?? 0),
-      currency: data.currency ?? 'USD',
+      balance:      parseFloat(bal.balance || 0),
+      currencyName: bal.currency_name   || 'USD',
+      symbol:       bal.currency_symbol || '$',
     };
   } catch (err) {
-    if (global.logger) global.logger.error(`[SATOFILL] getBalance: ${err.message}`);
-    return { balance: 0, currency: 'USD' };
+    if (global.logger) global.logger.error('[SATOFILL] getBalance: ' + err.message);
+    return { balance: 0, currencyName: 'USD', symbol: '$' };
   }
 }
 
 // ─────────────────────────────────────────
 // MAP STATUS
+// القيم الفعلية من Satofill:
+// processing, completed, rejected, cancelled, pending
 // ─────────────────────────────────────────
 function mapStatus(satofillStatus) {
   if (!satofillStatus) return 'PROCESSING';
-  const map = {
-    'pending':      'PENDING',
-    'Pending':      'PENDING',
-    'processing':   'PROCESSING',
-    'Processing':   'PROCESSING',
-    'in progress':  'PROCESSING',
-    'In progress':  'PROCESSING',
-    'active':       'PROCESSING',
-    'Active':       'PROCESSING',
-    'completed':    'COMPLETED',
-    'Completed':    'COMPLETED',
-    'partial':      'PARTIAL',
-    'Partial':      'PARTIAL',
-    'canceled':     'CANCELLED',
-    'Canceled':     'CANCELLED',
-    'cancelled':    'CANCELLED',
-    'Cancelled':    'CANCELLED',
-    'failed':       'FAILED',
-    'Failed':       'FAILED',
-    'error':        'FAILED',
-    'Error':        'FAILED',
+
+  var s = String(satofillStatus).toLowerCase().trim();
+
+  var map = {
+    'pending':    'PENDING',
+    'processing': 'PROCESSING',
+    'completed':  'COMPLETED',
+    'complete':   'COMPLETED',
+    'rejected':   'FAILED',      // ← الحالة الحرجة المفقودة سابقاً
+    'cancelled':  'CANCELLED',
+    'canceled':   'CANCELLED',
+    'not_found':  'FAILED',
+    'failed':     'FAILED',
+    'error':      'FAILED',
   };
-  return map[satofillStatus] || 'PROCESSING';
+
+  return map[s] || 'PROCESSING';
 }
 
 // ─────────────────────────────────────────
-// TEST CONNECTION — للتشخيص من لوحة الأدمن
+// TEST CONNECTION
 // ─────────────────────────────────────────
 async function testConnection() {
-  const start = Date.now();
+  var start = Date.now();
   try {
-    const balance = await getBalance();
+    var result = await getBalance();
     return {
       ok:       true,
       ms:       Date.now() - start,
       endpoint: BASE_URL,
-      balance:  balance.balance,
-      currency: balance.currency,
+      balance:  result.balance,
+      currency: result.currencyName,
       error:    null,
     };
   } catch (err) {
@@ -271,7 +314,6 @@ async function testConnection() {
 
 module.exports = {
   getServices,
-  getService,
   createOrder,
   checkOrderStatus,
   checkMultipleOrders,
