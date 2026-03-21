@@ -3,147 +3,281 @@ require('dotenv').config();
 const http   = require('http');
 const config = require('../config/settings');
 
-// ─────────────────────────────────────────
-// LOGGER
-// ─────────────────────────────────────────
 const winston = require('winston');
 const logger  = winston.createLogger({
   level: 'info',
   format: winston.format.combine(
     winston.format.timestamp(),
-    winston.format.printf(({ timestamp, level, message }) =>
-      `[${timestamp}] ${level.toUpperCase()}: ${message}`
-    )
+    winston.format.printf(function(info) {
+      return '[' + info.timestamp + '] ' + info.level.toUpperCase() + ': ' + info.message;
+    })
   ),
   transports: [new winston.transports.Console()],
 });
 global.logger = logger;
 
-// ─────────────────────────────────────────
-// STATE
-// ─────────────────────────────────────────
-let appReady   = false;
-let expressApp = null;
-const PORT     = config.app.port;
+var appReady   = false;
+var expressApp = null;
+var PORT       = parseInt(process.env.PORT) || 3000;
 
-// ─────────────────────────────────────────
-// STEP 1: RAW HTTP SERVER - يبدأ فوراً
-// ─────────────────────────────────────────
-const rawServer = http.createServer((req, res) => {
+var rawServer = http.createServer(function(req, res) {
   if (req.url === '/health' || req.url === '/health/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status:    'ok',
-      ready:     appReady,
-      timestamp: new Date().toISOString(),
-      uptime:    process.uptime(),
-    }));
+    res.end(JSON.stringify({ status: 'ok', ready: appReady, uptime: process.uptime() }));
     return;
   }
-
   if (expressApp) {
     expressApp(req, res);
   } else {
     res.writeHead(503, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      status:  'starting',
-      message: 'Application is initializing...',
-    }));
+    res.end(JSON.stringify({ status: 'starting' }));
   }
 });
 
-rawServer.listen(PORT, '0.0.0.0', () => {
-  logger.info(`✅ HTTP server listening on port ${PORT}`);
-  logger.info('🔄 Starting background initialization...');
-
-  initialize().catch((err) => {
-    logger.error(`❌ Fatal: ${err.message}`);
-    process.exit(1);
-  });
+rawServer.listen(PORT, '0.0.0.0', function() {
+  logger.info('HTTP server on port ' + PORT);
+  initialize();
 });
 
-// ─────────────────────────────────────────
-// PUSH SCHEMA TO DATABASE (بدلاً من migrate)
-// ─────────────────────────────────────────
-async function pushSchema() {
-  const { exec } = require('child_process');
-  return new Promise((resolve) => {
-    logger.info('🔄 Pushing schema to database (prisma db push)...');
-    exec(
-      'npx prisma db push --accept-data-loss --skip-generate',
-      { timeout: 120000 },
-      (error, stdout, stderr) => {
-        if (error) {
-          logger.error(`⚠️ Schema push error: ${error.message}`);
-          if (stderr) logger.error(`[STDERR] ${stderr.trim()}`);
-          resolve(); // لا نوقف التشغيل
-          return;
-        }
-        if (stdout) logger.info(`[DB PUSH] ${stdout.trim()}`);
-        logger.info('✅ Schema pushed successfully - all tables created');
+rawServer.on('error', function(err) {
+  console.error('Server error: ' + err.message);
+  process.exit(1);
+});
+
+function pushSchema() {
+  return new Promise(function(resolve) {
+    var exec = require('child_process').exec;
+    logger.info('Pushing schema...');
+    exec('npx prisma db push --accept-data-loss --skip-generate', { timeout: 120000 },
+      function(error, stdout) {
+        if (error) { logger.error('Schema push failed: ' + error.message); }
+        else if (stdout) { logger.info(stdout.trim()); }
+        logger.info('Schema done');
         resolve();
       }
     );
   });
 }
 
-// ─────────────────────────────────────────
-// ENSURE ADMIN EXISTS
-// ─────────────────────────────────────────
 async function ensureAdmin(prisma) {
-  const bcrypt   = require('bcryptjs');
-  const existing = await prisma.admin.findFirst({
-    where: { username: config.admin.username },
-  });
+  var bcrypt   = require('bcryptjs');
+  var existing = await prisma.admin.findFirst({ where: { username: config.admin.username } });
   if (!existing) {
-    const hash = await bcrypt.hash(config.admin.password, 12);
+    var hash = await bcrypt.hash(config.admin.password, 12);
     await prisma.admin.create({
-      data: {
-        username:     config.admin.username,
-        passwordHash: hash,
-        isSuperAdmin: true,
-        isActive:     true,
-      },
+      data: { username: config.admin.username, passwordHash: hash, isSuperAdmin: true, isActive: true },
     });
-    logger.info(`✅ Default admin created: ${config.admin.username}`);
+    logger.info('Admin created');
   } else {
-    logger.info(`✅ Admin already exists: ${config.admin.username}`);
+    logger.info('Admin exists');
   }
 }
 
-// ─────────────────────────────────────────
-// ENSURE DEFAULT SETTINGS
-// ─────────────────────────────────────────
 async function ensureSettings(prisma) {
-  const defaults = [
-    { key: 'exchange_rate',        value: String(config.pricing.exchangeRate) },
-    { key: 'profit_margin',        value: String(config.pricing.profitMargin) },
-    { key: 'maintenance_mode',     value: 'false' },
-    { key: 'channel_verification', value: 'false' },
-    { key: 'referral_commission',  value: '0.05' },
-    { key: 'min_deposit',          value: '10' },
-    { key: 'max_deposit',          value: '10000' },
-    { key: 'min_withdraw',         value: '10' },
-    { key: 'max_withdraw',         value: '5000' },
-    { key: 'vip_bronze_threshold', value: '100' },
-    { key: 'vip_silver_threshold', value: '500' },
-    { key: 'vip_gold_threshold',   value: '2000' },
-    { key: 'vip_bronze_discount',  value: '0.02' },
-    { key: 'vip_silver_discount',  value: '0.05' },
-    { key: 'vip_gold_discount',    value: '0.10' },
-    { key: 'support_min_length',   value: '20' },
-    { key: 'bot_name',             value: 'خدمات التواصل الاجتماعي' },
-    { key: 'welcome_message',      value: 'مرحباً بك في منصتنا للخدمات الرقمية! 🎉' },
+  var defaults = [
+    ['exchange_rate', String(config.pricing.exchangeRate)],
+    ['profit_margin', String(config.pricing.profitMargin)],
+    ['maintenance_mode', 'false'],
+    ['channel_verification', 'false'],
+    ['referral_commission', '0.05'],
+    ['min_deposit', '10'], ['max_deposit', '10000'],
+    ['min_withdraw', '10'], ['max_withdraw', '5000'],
+    ['vip_bronze_threshold', '100'], ['vip_silver_threshold', '500'], ['vip_gold_threshold', '2000'],
+    ['vip_bronze_discount', '0.02'], ['vip_silver_discount', '0.05'], ['vip_gold_discount', '0.10'],
+    ['support_min_length', '20'], ['bot_name', 'Bot'], ['welcome_message', 'مرحباً!'],
   ];
-
-  for (const s of defaults) {
+  for (var i = 0; i < defaults.length; i++) {
     await prisma.setting.upsert({
-      where:  { key: s.key },
-      update: {},
-      create: s,
+      where: { key: defaults[i][0] }, update: {}, create: { key: defaults[i][0], value: defaults[i][1] },
     });
   }
-  logger.info('✅ Default settings ensured');
+  logger.info('Settings ready');
+}
+
+// ─────────────────────────────────────────
+// JOBS — مستقلة تماماً عن initialize
+// ─────────────────────────────────────────
+function startJobs() {
+  logger.info('=== STARTING JOBS ===');
+
+  // ── orderSync ──
+  try {
+    var cron     = require('node-cron');
+    var PrismaC  = require('@prisma/client').PrismaClient;
+    var satofill = require('../satofill/satofillClient');
+    var jobPrisma = new PrismaC({ log: [] });
+
+    var syncRunning = false;
+
+    async function runOrderSync() {
+      if (syncRunning) { return; }
+      syncRunning = true;
+      try {
+        var orders = await jobPrisma.order.findMany({
+          where: { status: { in: ['PENDING', 'PROCESSING'] } },
+          take: 50,
+          orderBy: { createdAt: 'desc' },
+        });
+
+        logger.info('[SYNC] Active orders: ' + orders.length);
+        if (orders.length === 0) { syncRunning = false; return; }
+
+        for (var i = 0; i < orders.length; i++) {
+          var order = orders[i];
+          if (!order.satofillOrderId) {
+            logger.info('[SYNC] Order #' + order.id + ' no satofillId — skip');
+            continue;
+          }
+
+          try {
+            logger.info('[SYNC] Checking #' + order.id + ' → ' + order.satofillOrderId);
+
+            var result    = await satofill.checkOrderStatus(order.satofillOrderId);
+            var newStatus = satofill.mapStatus(result.status);
+
+            logger.info('[SYNC] #' + order.id + ' satofill="' + result.status + '" mapped="' + newStatus + '" was="' + order.status + '"');
+
+            if (newStatus === order.status) { continue; }
+
+            logger.info('[SYNC] #' + order.id + ' CHANGING: ' + order.status + ' -> ' + newStatus);
+
+            if (newStatus === 'FAILED' || newStatus === 'CANCELLED') {
+              var refundAmt = parseFloat(order.totalPrice);
+              await jobPrisma.$transaction(async function(tx) {
+                await tx.order.update({
+                  where: { id: order.id },
+                  data: { status: newStatus, adminNote: 'Satofill: ' + result.status + ' — refunded', updatedAt: new Date() },
+                });
+                var user = await tx.user.findUnique({ where: { id: order.userId } });
+                if (!user) return;
+                var before = parseFloat(user.balance);
+                var after  = before + refundAmt;
+                await tx.user.update({ where: { id: order.userId }, data: { balance: after } });
+                await tx.walletTransaction.create({
+                  data: {
+                    userId: order.userId, type: 'REFUND',
+                    amount: refundAmt, balanceBefore: before, balanceAfter: after,
+                    description: 'استرداد — طلب #' + order.id + ' (' + newStatus + ')',
+                    refId: String(order.id),
+                  },
+                });
+              });
+              logger.info('[SYNC] Refunded ' + refundAmt + '$ to user #' + order.userId);
+
+              try {
+                var bot  = require('../bot/bot').bot;
+                var u    = await jobPrisma.user.findUnique({ where: { id: order.userId } });
+                if (bot && u) {
+                  var emoji = newStatus === 'CANCELLED' ? '🚫' : '❌';
+                  var label = newStatus === 'CANCELLED' ? 'ملغى' : 'مرفوض';
+                  await bot.telegram.sendMessage(Number(u.telegramId),
+                    emoji + ' تحديث طلب #' + order.id + '\nالحالة: ' + label +
+                    '\nتم إعادة ' + refundAmt.toFixed(2) + '$ لرصيدك.'
+                  );
+                }
+              } catch (_) {}
+
+            } else if (newStatus === 'PARTIAL') {
+              var remains  = parseInt(result.remains) || 0;
+              var ppu      = parseFloat(order.pricePerUnit) || 0;
+              var partialR = remains > 0 ? parseFloat((ppu * remains).toFixed(4)) : 0;
+              await jobPrisma.$transaction(async function(tx) {
+                await tx.order.update({
+                  where: { id: order.id },
+                  data: { status: 'PARTIAL', remains: remains, startCount: result.startCount || null, updatedAt: new Date() },
+                });
+                if (partialR > 0) {
+                  var u2 = await tx.user.findUnique({ where: { id: order.userId } });
+                  if (!u2) return;
+                  var b2 = parseFloat(u2.balance);
+                  var a2 = b2 + partialR;
+                  await tx.user.update({ where: { id: order.userId }, data: { balance: a2 } });
+                  await tx.walletTransaction.create({
+                    data: {
+                      userId: order.userId, type: 'REFUND',
+                      amount: partialR, balanceBefore: b2, balanceAfter: a2,
+                      description: 'استرداد جزئي — طلب #' + order.id,
+                      refId: String(order.id),
+                    },
+                  });
+                }
+              });
+              logger.info('[SYNC] Partial refund ' + partialR + '$ for order #' + order.id);
+
+            } else if (newStatus === 'COMPLETED') {
+              await jobPrisma.order.update({
+                where: { id: order.id },
+                data: { status: 'COMPLETED', startCount: result.startCount || null, remains: 0, updatedAt: new Date() },
+              });
+              try {
+                var botC = require('../bot/bot').bot;
+                var uC   = await jobPrisma.user.findUnique({ where: { id: order.userId } });
+                if (botC && uC) {
+                  await botC.telegram.sendMessage(Number(uC.telegramId), '✅ تم إكمال طلبك #' + order.id + ' بنجاح!');
+                }
+              } catch (_) {}
+
+            } else {
+              await jobPrisma.order.update({
+                where: { id: order.id },
+                data: { status: newStatus, startCount: result.startCount || null, remains: result.remains || null, updatedAt: new Date() },
+              });
+            }
+
+          } catch (orderErr) {
+            logger.error('[SYNC] Order #' + order.id + ' error: ' + orderErr.message);
+          }
+        }
+
+      } catch (syncErr) {
+        logger.error('[SYNC] Error: ' + syncErr.message);
+      } finally {
+        syncRunning = false;
+      }
+    }
+
+    cron.schedule('* * * * *', function() { runOrderSync(); });
+    logger.info('[SYNC] Job registered — every 1 min');
+
+  } catch (e) {
+    logger.error('orderSync setup failed: ' + e.message);
+    logger.error(e.stack || '');
+  }
+
+  // ── cacheRefresh ──
+  try {
+    var cron2         = require('node-cron');
+    var orderSvcCache = require('../services/orderService');
+    var cacheRunning  = false;
+    cron2.schedule('*/30 * * * * *', async function() {
+      if (cacheRunning) return;
+      cacheRunning = true;
+      try { await orderSvcCache.refreshProductCache(); }
+      catch (_) {}
+      finally { cacheRunning = false; }
+    });
+    logger.info('[CACHE] Job registered — every 30s');
+  } catch (e) {
+    logger.error('cacheRefresh setup failed: ' + e.message);
+  }
+
+  // ── dailyStats ──
+  try {
+    require('../jobs/dailyStats');
+    logger.info('[STATS] Job registered');
+  } catch (e) {
+    logger.error('dailyStats setup failed: ' + e.message);
+  }
+
+  // ── backupJob ──
+  try {
+    require('../jobs/backupJob');
+    logger.info('[BACKUP] Job registered');
+  } catch (e) {
+    logger.error('backupJob setup failed: ' + e.message);
+  }
+
+  logger.info('=== ALL JOBS LOADED ===');
 }
 
 // ─────────────────────────────────────────
@@ -151,78 +285,84 @@ async function ensureSettings(prisma) {
 // ─────────────────────────────────────────
 async function initialize() {
   try {
-
-    // ── 1. Push schema (ينشئ الجداول مباشرة من schema.prisma) ──
     await pushSchema();
 
-    // ── 2. Connect Prisma ──
-    const { PrismaClient } = require('@prisma/client');
-    const prisma = new PrismaClient({
-      log: ['error'],
-    });
+    var PrismaClient = require('@prisma/client').PrismaClient;
+    var prisma = new PrismaClient({ log: ['error'] });
     await prisma.$connect();
-    logger.info('✅ Database connected');
+    logger.info('Database connected');
 
-    // ── 3. Seed defaults ──
     await ensureAdmin(prisma);
     await ensureSettings(prisma);
 
-    // ── 4. Load Express App ──
-    logger.info('🔄 Loading Express application...');
+    logger.info('Loading Express...');
     expressApp = require('./app');
-    logger.info('✅ Express app loaded');
+    logger.info('Express loaded');
 
-    // ── 5. Start Telegram Bot ──
     try {
-      const { startBot } = require('../bot/bot');
+      var startBot = require('../bot/bot').startBot;
       await startBot();
-      logger.info('✅ Telegram Bot started');
+      logger.info('Bot started');
     } catch (botErr) {
-      logger.error(`❌ Bot error (non-fatal): ${botErr.message}`);
+      logger.error('Bot error (non-fatal): ' + botErr.message);
     }
 
-    // ── 6. Start Background Jobs ──
-    try {
-      require('../jobs/orderSync');
-      require('../jobs/cacheRefresh');
-      require('../jobs/dailyStats');
-      require('../jobs/backupJob');
-      logger.info('✅ Background jobs started');
-    } catch (jobErr) {
-      logger.error(`❌ Jobs error (non-fatal): ${jobErr.message}`);
-    }
+    // Jobs تعمل بشكل مستقل — لا تؤثر على التهيئة
+    startJobs();
 
-    // ── 7. Ready ──
     appReady = true;
-    logger.info('🎉 Application fully initialized and ready!');
+    logger.info('=== APPLICATION READY ===');
 
   } catch (err) {
-    logger.error(`❌ Initialization failed: ${err.message}`);
-    logger.error(err.stack);
-    process.exit(1);
+    logger.error('Initialization failed: ' + err.message);
+    logger.error(err.stack || '');
   }
 }
 
-// ─────────────────────────────────────────
-// GRACEFUL SHUTDOWN
-// ─────────────────────────────────────────
-process.on('SIGTERM', async () => {
-  logger.info('🛑 SIGTERM - shutting down...');
-  rawServer.close();
-  process.exit(0);
+process.on('SIGTERM', function() {
+  logger.info('SIGTERM');
+  rawServer.close(function() { process.exit(0); });
 });
 
-process.on('SIGINT', async () => {
-  logger.info('🛑 SIGINT - shutting down...');
-  rawServer.close();
-  process.exit(0);
+process.on('SIGINT', function() {
+  logger.info('SIGINT');
+  rawServer.close(function() { process.exit(0); });
 });
 
-process.on('unhandledRejection', (reason) => {
-  logger.error(`Unhandled Rejection: ${reason}`);
+process.on('unhandledRejection', function(reason) {
+  logger.error('UnhandledRejection: ' + String(reason && reason.message ? reason.message : reason));
 });
 
-process.on('uncaughtException', (err) => {
-  logger.error(`Uncaught Exception: ${err.message}`);
-  process.exit(1);
+process.on('uncaughtException', function(err) {
+  logger.error('UncaughtException: ' + err.message);
 });
+```
+
+---
+
+بعد الرفع ستظهر هذه الأسطر بالترتيب في الـ logs:
+```
+HTTP server on port XXXX
+Pushing schema...
+Database connected
+Admin exists
+Settings ready
+Loading Express...
+Express loaded
+Bot started
+=== STARTING JOBS ===
+[SYNC] Job registered — every 1 min
+[CACHE] Job registered — every 30s
+[STATS] Job registered
+[BACKUP] Job registered
+=== ALL JOBS LOADED ===
+=== APPLICATION READY ===
+```
+
+وبعد دقيقة:
+```
+[SYNC] Active orders: 1
+[SYNC] Checking #6 → 285925
+[SYNC] #6 satofill="rejected" mapped="FAILED" was="PROCESSING"
+[SYNC] #6 CHANGING: PROCESSING -> FAILED
+[SYNC] Refunded 4.41$ to user #X
