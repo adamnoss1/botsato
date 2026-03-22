@@ -4,6 +4,7 @@
     "axios": "^1.6.7",
     "bcryptjs": "^2.4.3",
     "connect-pg-simple": "^9.0.1",
+    "cookie-parser": "^1.4.7",
     "csrf-csrf": "^3.0.3",
     "dotenv": "^16.4.5",
     "ejs": "^3.1.9",

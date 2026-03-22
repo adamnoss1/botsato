@@ -6,6 +6,7 @@ const session        = require('express-session');
 const pgSession      = require('connect-pg-simple')(session);
 const helmet         = require('helmet');
 const methodOverride = require('method-override');
+const cookieParser   = require('cookie-parser');
 const path           = require('path');
 const config         = require('../config/settings');
 const { botRateLimit } = require('../middleware/rateLimit');
@@ -14,12 +15,12 @@ const adminRoutes    = require('../admin/routes/index');
 const app = express();
 
 // ─────────────────────────────────────────
-// TRUST PROXY (مهم لـ Railway — خلف Load Balancer)
+// TRUST PROXY (مهم لـ Railway)
 // ─────────────────────────────────────────
 app.set('trust proxy', 1);
 
 // ─────────────────────────────────────────
-// SECURITY HEADERS (Helmet)
+// SECURITY HEADERS
 // ─────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: {
@@ -44,7 +45,6 @@ app.use(helmet({
       imgSrc: ["'self'", 'data:', 'https:'],
     },
   },
-  // تعطيل crossOriginEmbedderPolicy لأن EJS يستخدم CDN
   crossOriginEmbedderPolicy: false,
 }));
 
@@ -62,6 +62,11 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(methodOverride('_method'));
 
 // ─────────────────────────────────────────
+// COOKIE PARSER — مطلوب لـ csrf-csrf
+// ─────────────────────────────────────────
+app.use(cookieParser());
+
+// ─────────────────────────────────────────
 // STATIC FILES
 // ─────────────────────────────────────────
 app.use('/public', express.static(path.join(__dirname, '../public'), {
@@ -71,21 +76,20 @@ app.use('/public', express.static(path.join(__dirname, '../public'), {
 
 // ─────────────────────────────────────────
 // SESSION — PostgreSQL Store
-// يحفظ الجلسات في DB بدل الذاكرة
 // ─────────────────────────────────────────
 app.use(session({
   store: new pgSession({
-    conString:             config.database.url,
-    tableName:             'session',
-    createTableIfMissing:  true,
-    pruneSessionInterval:  60 * 15, // تنظيف كل 15 دقيقة
+    conString:            config.database.url,
+    tableName:            'session',
+    createTableIfMissing: true,
+    pruneSessionInterval: 60 * 15,
   }),
   secret:            config.app.sessionSecret,
   resave:            false,
   saveUninitialized: false,
-  name:              'sid', // اسم محايد بدل connect.sid
+  name:              'sid',
   cookie: {
-    secure:   config.app.nodeEnv === 'production', // HTTPS فقط في production
+    secure:   config.app.nodeEnv === 'production',
     httpOnly: true,
     maxAge:   config.security.sessionMaxAge,
     sameSite: 'lax',
@@ -93,46 +97,41 @@ app.use(session({
 }));
 
 // ─────────────────────────────────────────
-// CSRF PROTECTION — csrf-csrf (بديل csurf)
+// CSRF PROTECTION — csrf-csrf
 // ─────────────────────────────────────────
 const { doubleCsrf } = require('csrf-csrf');
 
-const {
-  generateToken,
-  doubleCsrfProtection,
-} = doubleCsrf({
-  getSecret:   () => config.app.sessionSecret,
-  cookieName:  '__Host-psifi.x-csrf-token',
+const { generateToken, doubleCsrfProtection } = doubleCsrf({
+  getSecret: () => config.app.sessionSecret,
+  // ✅ اسم بدون __Host- لتجنب مشاكل HTTPS/proxy
+  cookieName: 'x-csrf-token',
   cookieOptions: {
     httpOnly: true,
     sameSite: 'lax',
     secure:   config.app.nodeEnv === 'production',
     path:     '/',
   },
-  size:        64,
+  size:           64,
   ignoredMethods: ['GET', 'HEAD', 'OPTIONS'],
 });
 
-// تطبيق CSRF على جميع صفحات admin
+// تطبيق CSRF على admin فقط
 app.use('/admin', doubleCsrfProtection);
 
 // ─────────────────────────────────────────
 // GLOBAL LOCALS FOR VIEWS
-// متغيرات متاحة في كل EJS template
 // ─────────────────────────────────────────
 app.use((req, res, next) => {
-  res.locals.admin   = req.session.admin  || null;
+  res.locals.admin   = req.session.admin   || null;
   res.locals.success = req.session.success || null;
   res.locals.error   = req.session.error   || null;
 
-  // توليد CSRF token لكل request
   try {
     res.locals.csrfToken = generateToken(req, res);
   } catch (_) {
     res.locals.csrfToken = '';
   }
 
-  // مسح Flash messages بعد قراءتها
   delete req.session.success;
   delete req.session.error;
 
@@ -145,14 +144,14 @@ app.use((req, res, next) => {
 app.use('/admin', botRateLimit, adminRoutes);
 
 // ─────────────────────────────────────────
-// ROOT → REDIRECT
+// ROOT REDIRECT
 // ─────────────────────────────────────────
 app.get('/', (req, res) => {
   res.redirect('/admin/dashboard');
 });
 
 // ─────────────────────────────────────────
-// HEALTH CHECK (Express level)
+// HEALTH CHECK
 // ─────────────────────────────────────────
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
@@ -173,7 +172,11 @@ app.use((req, res) => {
 // ─────────────────────────────────────────
 app.use((err, req, res, next) => {
   // CSRF Error
-  if (err.code === 'EBADCSRFTOKEN' || err.message === 'invalid csrf token') {
+  if (
+    err.code === 'EBADCSRFTOKEN' ||
+    err.message === 'invalid csrf token' ||
+    err.message === 'ForbiddenError'
+  ) {
     if (global.logger) global.logger.warn('[CSRF] Invalid token from ' + req.ip);
     req.session.error = 'انتهت صلاحية الجلسة. يرجى المحاولة مجدداً.';
     return res.redirect('/admin/login');
