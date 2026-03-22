@@ -1,27 +1,30 @@
-const { Markup } = require('telegraf');
-const keyboards  = require('./keyboards');
-const userSvc    = require('../services/userService');
-const walletSvc  = require('../services/walletService');
-const depositSvc = require('../services/depositService');
-const withdrawSvc= require('../services/withdrawService');
-const orderSvc   = require('../services/orderService');
-const referralSvc= require('../services/referralService');
-const vipSvc     = require('../services/vipService');
-const settingsSvc= require('../services/settingsService');
-const notifySvc  = require('../services/notificationService');
+// bot/handlers.js
+const { Markup }  = require('telegraf');
+const keyboards   = require('./keyboards');
+const userSvc     = require('../services/userService');
+const walletSvc   = require('../services/walletService');
+const depositSvc  = require('../services/depositService');
+const withdrawSvc = require('../services/withdrawService');
+const orderSvc    = require('../services/orderService');
+const referralSvc = require('../services/referralService');
+const vipSvc      = require('../services/vipService');
+const settingsSvc = require('../services/settingsService');
+const notifySvc   = require('../services/notificationService');
 const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
-const config = require('../config/settings');
+const prisma  = new PrismaClient();
+const config  = require('../config/settings');
+
+const PRODUCTS_PER_PAGE = 8;
 
 // ─────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────
 function formatBalance(amount) {
-  return parseFloat(amount).toFixed(2);
+  return parseFloat(amount || 0).toFixed(2);
 }
 
 function escapeMarkdown(text) {
-  return String(text).replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
+  return String(text || '').replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
 }
 
 async function checkChannelSubscription(ctx) {
@@ -40,7 +43,7 @@ async function checkChannelSubscription(ctx) {
 }
 
 // ─────────────────────────────────────────
-// NOTIFY REFERRER (new user joined)
+// NOTIFY REFERRER
 // ─────────────────────────────────────────
 async function notifyReferrer(referrerId, newUser) {
   if (!referrerId) return;
@@ -75,6 +78,30 @@ ${badge} المستوى: *${label}*
 }
 
 // ─────────────────────────────────────────
+// GET VIP DISCOUNT
+// ─────────────────────────────────────────
+async function getVipDiscount(vipLevel, settings) {
+  const map = {
+    NORMAL: 0,
+    BRONZE: parseFloat(settings.vip_bronze_discount || '0.02'),
+    SILVER: parseFloat(settings.vip_silver_discount || '0.05'),
+    GOLD:   parseFloat(settings.vip_gold_discount   || '0.10'),
+  };
+  return map[vipLevel] || 0;
+}
+
+// ─────────────────────────────────────────
+// SAFE REPLY HELPER
+// ─────────────────────────────────────────
+async function safeReply(ctx, text, extra) {
+  try {
+    return await ctx.reply(text, extra);
+  } catch (err) {
+    if (global.logger) global.logger.error('[BOT] safeReply error: ' + err.message);
+  }
+}
+
+// ─────────────────────────────────────────
 // REGISTER ALL HANDLERS
 // ─────────────────────────────────────────
 function register(bot) {
@@ -85,18 +112,16 @@ function register(bot) {
   bot.start(async (ctx) => {
     const payload = ctx.startPayload;
 
-    // Store referral code in session before user creation
     if (payload && payload.startsWith('ref_')) {
       ctx.session.pendingReferral = payload.replace('ref_', '');
     }
 
     const user = ctx.dbUser;
-    if (!user) return;
+    if (!user) return safeReply(ctx, '❌ حدث خطأ. حاول مجدداً.');
 
-    // Channel verification
     const subscribed = await checkChannelSubscription(ctx);
     if (!subscribed) {
-      return ctx.reply(
+      return safeReply(ctx,
         '📢 *يجب الاشتراك في قناتنا أولاً للاستمرار*',
         {
           parse_mode: 'Markdown',
@@ -106,16 +131,16 @@ function register(bot) {
     }
 
     const settings = await settingsSvc.getAllSettings();
-    const welcome  = settings.welcome_message || 'مرحباً بك!';
+    const welcome  = settings.welcome_message || 'مرحباً بك! 👋';
 
-    await ctx.reply(
+    await safeReply(ctx,
       `${welcome}\n\n${buildProfileMessage(user)}`,
       { parse_mode: 'Markdown', ...keyboards.mainMenu(user) }
     );
   });
 
   // ══════════════════════════════════════
-  // VERIFY SUBSCRIPTION CALLBACK
+  // VERIFY SUBSCRIPTION
   // ══════════════════════════════════════
   bot.action('verify_subscription', async (ctx) => {
     await ctx.answerCbQuery();
@@ -123,23 +148,23 @@ function register(bot) {
     if (!subscribed) {
       return ctx.answerCbQuery('❌ لم تشترك بعد في القناة!', { show_alert: true });
     }
-
     const user = ctx.dbUser;
+    if (!user) return;
     await ctx.editMessageText(
       `✅ تم التحقق!\n\n${buildProfileMessage(user)}`,
       { parse_mode: 'Markdown' }
     );
-    await ctx.reply('القائمة الرئيسية:', keyboards.mainMenu(user));
+    await safeReply(ctx, 'القائمة الرئيسية:', keyboards.mainMenu(user));
   });
 
   // ══════════════════════════════════════
   // MAIN MENU BUTTONS
   // ══════════════════════════════════════
 
-  // Profile / home
   bot.hears(['🏠 الرئيسية', '/profile'], async (ctx) => {
     const user = ctx.dbUser;
-    await ctx.reply(buildProfileMessage(user), {
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+    await safeReply(ctx, buildProfileMessage(user), {
       parse_mode: 'Markdown',
       ...keyboards.mainMenu(user),
     });
@@ -150,35 +175,43 @@ function register(bot) {
   // ──────────────────────────────────────
   bot.hears('💰 محفظتي', async (ctx) => {
     const user = ctx.dbUser;
-    await ctx.reply(
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+    await safeReply(ctx,
       `💰 *محفظتك*\n\nرصيدك الحالي: *${formatBalance(user.balance)}$*`,
       { parse_mode: 'Markdown', ...keyboards.walletMenu() }
     );
   });
 
   bot.hears('💳 رصيدي', async (ctx) => {
-    const user = await userSvc.getUserById(ctx.dbUser.id);
-    await ctx.reply(
-      `💳 رصيدك الحالي: *${formatBalance(user.balance)}$*`,
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+    const fresh = await userSvc.getUserById(user.id);
+    await safeReply(ctx,
+      `💳 رصيدك الحالي: *${formatBalance(fresh.balance)}$*`,
       { parse_mode: 'Markdown' }
     );
   });
 
   bot.hears('🔙 القائمة الرئيسية', async (ctx) => {
     const user = ctx.dbUser;
-    await ctx.reply('القائمة الرئيسية:', keyboards.mainMenu(user));
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+    ctx.session.step = null;
+    await safeReply(ctx, 'القائمة الرئيسية:', keyboards.mainMenu(user));
   });
 
   // ──────────────────────────────────────
   // ➕ DEPOSIT
   // ──────────────────────────────────────
   bot.hears('➕ إيداع', async (ctx) => {
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+
     const methods = await depositSvc.getActiveMethods();
     if (methods.length === 0) {
-      return ctx.reply('❌ لا توجد طرق إيداع متاحة حالياً.');
+      return safeReply(ctx, '❌ لا توجد طرق إيداع متاحة حالياً.');
     }
     ctx.session.step = null;
-    await ctx.reply(
+    await safeReply(ctx,
       '💳 *اختر طريقة الإيداع:*',
       { parse_mode: 'Markdown', ...keyboards.depositMethodsKeyboard(methods) }
     );
@@ -186,20 +219,25 @@ function register(bot) {
 
   bot.action(/^deposit_method_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery();
+    const user = ctx.dbUser;
+    if (!user) return;
+
     const methodId = parseInt(ctx.match[1]);
     const method   = await prisma.depositMethod.findUnique({ where: { id: methodId } });
-    if (!method) return ctx.reply('❌ الطريقة غير موجودة');
+    if (!method || !method.isActive) {
+      return ctx.answerCbQuery('❌ الطريقة غير متاحة', { show_alert: true });
+    }
 
     ctx.session.depositMethodId = methodId;
     ctx.session.step = 'deposit_amount';
 
     const instructions = method.instructions || '';
     await ctx.editMessageText(
-      `💳 *${method.name}*\n\n` +
+      `💳 *${escapeMarkdown(method.name)}*\n\n` +
       `📊 سعر الصرف: 1$ = ${method.exchangeRate}\n` +
       `📉 الحد الأدنى: ${method.minAmount}\n` +
       `📈 الحد الأقصى: ${method.maxAmount}\n` +
-      (instructions ? `\n📋 التعليمات:\n${instructions}\n` : '') +
+      (instructions ? `\n📋 التعليمات:\n${escapeMarkdown(instructions)}\n` : '') +
       `\n💰 أدخل المبلغ بالعملة المحلية:`,
       { parse_mode: 'Markdown' }
     );
@@ -209,12 +247,15 @@ function register(bot) {
   // ➖ WITHDRAW
   // ──────────────────────────────────────
   bot.hears('➖ سحب', async (ctx) => {
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+
     const methods = await withdrawSvc.getActiveMethods();
     if (methods.length === 0) {
-      return ctx.reply('❌ لا توجد طرق سحب متاحة حالياً.');
+      return safeReply(ctx, '❌ لا توجد طرق سحب متاحة حالياً.');
     }
     ctx.session.step = null;
-    await ctx.reply(
+    await safeReply(ctx,
       '💸 *اختر طريقة السحب:*',
       { parse_mode: 'Markdown', ...keyboards.withdrawMethodsKeyboard(methods) }
     );
@@ -222,12 +263,17 @@ function register(bot) {
 
   bot.action(/^withdraw_method_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery();
+    const user = ctx.dbUser;
+    if (!user) return;
+
     const methodId = parseInt(ctx.match[1]);
     const method   = await prisma.withdrawMethod.findUnique({ where: { id: methodId } });
-    if (!method) return ctx.reply('❌ الطريقة غير موجودة');
+    if (!method || !method.isActive) {
+      return ctx.answerCbQuery('❌ الطريقة غير متاحة', { show_alert: true });
+    }
 
-    const user = await userSvc.getUserById(ctx.dbUser.id);
-    const feeText = method.feeType === 'percentage'
+    const fresh    = await userSvc.getUserById(user.id);
+    const feeText  = method.feeType === 'percentage'
       ? `${(parseFloat(method.feeValue) * 100).toFixed(1)}%`
       : `${method.feeValue}$`;
 
@@ -235,8 +281,8 @@ function register(bot) {
     ctx.session.step = 'withdraw_amount';
 
     await ctx.editMessageText(
-      `💸 *${method.name}*\n\n` +
-      `💰 رصيدك: *${formatBalance(user.balance)}$*\n` +
+      `💸 *${escapeMarkdown(method.name)}*\n\n` +
+      `💰 رصيدك: *${formatBalance(fresh.balance)}$*\n` +
       `📉 الحد الأدنى: ${method.minAmount}$\n` +
       `📈 الحد الأقصى: ${method.maxAmount}$\n` +
       `💳 الرسوم: ${feeText}\n\n` +
@@ -249,86 +295,233 @@ function register(bot) {
   // ↔️ TRANSFER
   // ──────────────────────────────────────
   bot.hears('↔️ تحويل رصيد', async (ctx) => {
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
     ctx.session.step = 'transfer_user';
-    await ctx.reply(
-      '↔️ *تحويل رصيد*\n\nأدخل ID المستخدم أو معرفه (@username):',
+    await safeReply(ctx,
+      '↔️ *تحويل رصيد*\n\nأدخل ID المستخدم الداخلي أو معرفه (@username):',
       { parse_mode: 'Markdown', ...keyboards.cancelButton() }
     );
   });
 
   // ──────────────────────────────────────
-  // ⚡️ AUTO SERVICE
+  // ⚡️ AUTO SERVICE — اختيار التصنيفات الهرمية
   // ──────────────────────────────────────
   bot.hears('⚡️ شحن تلقائي', async (ctx) => {
-    const groups = await prisma.productGroup.findMany({
-      where: { isActive: true },
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+
+    // جلب التصنيفات الرئيسية فقط (parentId = null)
+    const rootGroups = await prisma.productGroup.findMany({
+      where:   { isActive: true, parentId: null },
       orderBy: { sortOrder: 'asc' },
     });
 
-    if (groups.length === 0) {
-      return ctx.reply('❌ لا توجد خدمات متاحة حالياً.');
+    if (rootGroups.length === 0) {
+      return safeReply(ctx, '❌ لا توجد خدمات متاحة حالياً.');
     }
 
-    ctx.session.step = 'auto_service';
-    await ctx.reply(
-      '⚡️ *اختر الفئة:*',
-      { parse_mode: 'Markdown', ...keyboards.productGroupsKeyboard(groups) }
+    ctx.session.step           = 'auto_service';
+    ctx.session.groupPath      = [];  // مسار التصنيفات المختارة
+    ctx.session.selectedGroupId = null;
+
+    await safeReply(ctx,
+      '⚡️ *اختر التصنيف:*',
+      { parse_mode: 'Markdown', ...keyboards.productGroupsKeyboard(rootGroups, null) }
     );
   });
 
+  // ── اختيار تصنيف (رئيسي أو فرعي) ──
   bot.action(/^group_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery();
-    const groupId = parseInt(ctx.match[1]);
+    const user = ctx.dbUser;
+    if (!user) return;
 
-    const products = await prisma.product.findMany({
-      where: { groupId, isActive: true, isManual: false },
-      orderBy: { sortOrder: 'asc' },
-      take: 10,
+    const groupId = parseInt(ctx.match[1]);
+    const group   = await prisma.productGroup.findUnique({
+      where:   { id: groupId },
+      include: { children: { where: { isActive: true }, orderBy: { sortOrder: 'asc' } } },
     });
 
-    if (products.length === 0) {
-      return ctx.answerCbQuery('❌ لا توجد خدمات في هذه الفئة', { show_alert: true });
+    if (!group) {
+      return ctx.answerCbQuery('❌ التصنيف غير موجود', { show_alert: true });
     }
 
+    // إذا يوجد تصنيفات فرعية → اعرضها
+    if (group.children && group.children.length > 0) {
+      ctx.session.groupPath = [...(ctx.session.groupPath || []), groupId];
+
+      await ctx.editMessageText(
+        `📁 *${escapeMarkdown(group.name)}*\n\nاختر التصنيف الفرعي:`,
+        {
+          parse_mode: 'Markdown',
+          ...keyboards.productGroupsKeyboard(group.children, groupId),
+        }
+      );
+      return;
+    }
+
+    // لا يوجد تصنيفات فرعية → اعرض المنتجات
+    const page  = 1;
+    const skip  = 0;
+    const limit = PRODUCTS_PER_PAGE;
+
+    const [products, total] = await Promise.all([
+      prisma.product.findMany({
+        where:   { groupId, isActive: true, isManual: false },
+        orderBy: { sortOrder: 'asc' },
+        skip,
+        take: limit,
+      }),
+      prisma.product.count({
+        where: { groupId, isActive: true, isManual: false },
+      }),
+    ]);
+
+    if (products.length === 0) {
+      return ctx.answerCbQuery('❌ لا توجد خدمات في هذا التصنيف', { show_alert: true });
+    }
+
+    const totalPages = Math.ceil(total / limit);
     ctx.session.selectedGroupId = groupId;
-    ctx.session.productsPage    = 1;
+    ctx.session.productsPage    = page;
 
     await ctx.editMessageText(
-      '📦 *اختر الخدمة:*',
-      { parse_mode: 'Markdown', ...keyboards.productsKeyboard(products, 1, 1) }
+      `📦 *${escapeMarkdown(group.name)}* — اختر الخدمة:`,
+      {
+        parse_mode: 'Markdown',
+        ...keyboards.productsKeyboard(products, page, totalPages),
+      }
     );
   });
 
+  // ── الرجوع لقائمة التصنيفات الرئيسية ──
+  bot.action('back_to_groups', async (ctx) => {
+    await ctx.answerCbQuery();
+    const user = ctx.dbUser;
+    if (!user) return;
+
+    // امسح مسار التصنيفات
+    ctx.session.groupPath       = [];
+    ctx.session.selectedGroupId = null;
+
+    const rootGroups = await prisma.productGroup.findMany({
+      where:   { isActive: true, parentId: null },
+      orderBy: { sortOrder: 'asc' },
+    });
+
+    await ctx.editMessageText(
+      '⚡️ *اختر التصنيف:*',
+      {
+        parse_mode: 'Markdown',
+        ...keyboards.productGroupsKeyboard(rootGroups, null),
+      }
+    );
+  });
+
+  // ── الرجوع للتصنيف الأب ──
+  bot.action(/^back_to_group_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery();
+    const parentId = parseInt(ctx.match[1]);
+
+    const parent = await prisma.productGroup.findUnique({
+      where:   { id: parentId },
+      include: { children: { where: { isActive: true }, orderBy: { sortOrder: 'asc' } } },
+    });
+
+    if (!parent) return;
+
+    await ctx.editMessageText(
+      `📁 *${escapeMarkdown(parent.name)}*\n\nاختر التصنيف الفرعي:`,
+      {
+        parse_mode: 'Markdown',
+        ...keyboards.productGroupsKeyboard(parent.children, parent.parentId),
+      }
+    );
+  });
+
+  // ── Pagination للمنتجات ──
+  bot.action(/^products_page_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery();
+    const user = ctx.dbUser;
+    if (!user) return;
+
+    const page    = parseInt(ctx.match[1]);
+    const groupId = ctx.session.selectedGroupId;
+
+    if (!groupId) {
+      return ctx.answerCbQuery('❌ حدث خطأ. ابدأ من جديد.', { show_alert: true });
+    }
+
+    const limit = PRODUCTS_PER_PAGE;
+    const skip  = (page - 1) * limit;
+
+    const [products, total] = await Promise.all([
+      prisma.product.findMany({
+        where:   { groupId, isActive: true, isManual: false },
+        orderBy: { sortOrder: 'asc' },
+        skip,
+        take: limit,
+      }),
+      prisma.product.count({
+        where: { groupId, isActive: true, isManual: false },
+      }),
+    ]);
+
+    if (products.length === 0) {
+      return ctx.answerCbQuery('لا توجد منتجات', { show_alert: true });
+    }
+
+    const totalPages = Math.ceil(total / limit);
+    ctx.session.productsPage = page;
+
+    const group = await prisma.productGroup.findUnique({ where: { id: groupId } });
+
+    await ctx.editMessageText(
+      `📦 *${escapeMarkdown(group?.name || '')}* — اختر الخدمة:`,
+      {
+        parse_mode: 'Markdown',
+        ...keyboards.productsKeyboard(products, page, totalPages),
+      }
+    );
+  });
+
+  // ── اختيار منتج ──
   bot.action(/^product_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery();
+    const user = ctx.dbUser;
+    if (!user) return;
+
     const productId = parseInt(ctx.match[1]);
     const product   = await prisma.product.findUnique({
-      where: { id: productId },
+      where:   { id: productId },
       include: { group: true },
     });
 
-    if (!product) return ctx.reply('❌ الخدمة غير موجودة');
+    if (!product || !product.isActive) {
+      return ctx.answerCbQuery('❌ الخدمة غير متاحة', { show_alert: true });
+    }
 
-    const user     = await userSvc.getUserById(ctx.dbUser.id);
+    const fresh    = await userSvc.getUserById(user.id);
     const settings = await settingsSvc.getAllSettings();
     const rate     = parseFloat(settings.exchange_rate  || '3.75');
     const margin   = parseFloat(settings.profit_margin  || '0.20');
-    const discount = await getVipDiscountLocal(user.vipLevel, settings);
+    const discount = await getVipDiscount(fresh.vipLevel, settings);
 
     const pricePerUnit = parseFloat(product.priceUsd) * (1 + margin) * (1 - discount);
     const pricePer1000 = (pricePerUnit * 1000 * rate).toFixed(4);
 
     ctx.session.selectedProductId = productId;
-    ctx.session.step = 'auto_quantity';
+    ctx.session.step              = 'auto_quantity';
 
     await ctx.editMessageText(
-      `📦 *${product.name}*\n\n` +
-      `📁 الفئة: ${product.group.name}\n` +
+      `📦 *${escapeMarkdown(product.name)}*\n\n` +
+      `📁 التصنيف: ${escapeMarkdown(product.group?.name || '')}\n` +
       `💰 السعر لكل 1000: *${pricePer1000}*\n` +
       `📉 الحد الأدنى: ${product.minQuantity}\n` +
       `📈 الحد الأقصى: ${product.maxQuantity}\n` +
-      (product.description ? `\n📋 ${product.description}\n` : '') +
-      `\n💰 رصيدك: *${formatBalance(user.balance)}$*\n\n` +
+      (product.description ? `\n📋 ${escapeMarkdown(product.description)}\n` : '') +
+      `\n💰 رصيدك: *${formatBalance(fresh.balance)}$*\n\n` +
       `أدخل الكمية المطلوبة:`,
       { parse_mode: 'Markdown' }
     );
@@ -338,25 +531,28 @@ function register(bot) {
   // ⚙️ MANUAL SERVICE
   // ──────────────────────────────────────
   bot.hears('⚙️ شحن يدوي', async (ctx) => {
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+
     const products = await prisma.product.findMany({
-      where: { isActive: true, isManual: true },
+      where:   { isActive: true, isManual: true },
       include: { group: true },
       orderBy: { sortOrder: 'asc' },
     });
 
     if (products.length === 0) {
-      return ctx.reply('❌ لا توجد خدمات يدوية متاحة حالياً.');
+      return safeReply(ctx, '❌ لا توجد خدمات يدوية متاحة حالياً.');
     }
 
     const buttons = products.map(p => [
       Markup.button.callback(
-        `${p.group.name} - ${p.name}`,
+        `${p.group?.name || ''} — ${p.name}`,
         `manual_product_${p.id}`
       ),
     ]);
     buttons.push([Markup.button.callback('❌ إلغاء', 'cancel')]);
 
-    await ctx.reply(
+    await safeReply(ctx,
       '⚙️ *اختر الخدمة اليدوية:*',
       { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) }
     );
@@ -364,11 +560,16 @@ function register(bot) {
 
   bot.action(/^manual_product_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery();
+    const user = ctx.dbUser;
+    if (!user) return;
+
     const productId = parseInt(ctx.match[1]);
     const product   = await prisma.product.findUnique({ where: { id: productId } });
-    if (!product) return ctx.reply('❌ المنتج غير موجود');
+    if (!product || !product.isActive) {
+      return ctx.answerCbQuery('❌ المنتج غير متاح', { show_alert: true });
+    }
 
-    const user     = await userSvc.getUserById(ctx.dbUser.id);
+    const fresh    = await userSvc.getUserById(user.id);
     const settings = await settingsSvc.getAllSettings();
     const rate     = parseFloat(settings.exchange_rate || '3.75');
     const priceLocal = (parseFloat(product.priceUsd) * rate).toFixed(4);
@@ -377,11 +578,11 @@ function register(bot) {
     ctx.session.step = 'manual_quantity';
 
     await ctx.editMessageText(
-      `⚙️ *${product.name}*\n\n` +
+      `⚙️ *${escapeMarkdown(product.name)}*\n\n` +
       `💰 السعر للوحدة: *${priceLocal}*\n` +
       `📉 الحد الأدنى: ${product.minQuantity}\n` +
       `📈 الحد الأقصى: ${product.maxQuantity}\n` +
-      `\n💰 رصيدك: *${formatBalance(user.balance)}$*\n\n` +
+      `\n💰 رصيدك: *${formatBalance(fresh.balance)}$*\n\n` +
       `أدخل الكمية:`,
       { parse_mode: 'Markdown' }
     );
@@ -391,124 +592,124 @@ function register(bot) {
   // 📊 TRANSACTIONS
   // ──────────────────────────────────────
   bot.hears('📊 معاملاتي', async (ctx) => {
-    await ctx.reply('📊 *سجل المعاملات*\nاختر نوع السجل:', {
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+    await safeReply(ctx, '📊 *سجل المعاملات*\nاختر نوع السجل:', {
       parse_mode: 'Markdown',
       ...keyboards.transactionsMenu(),
     });
   });
 
   bot.hears('📥 سجل الإيداعات', async (ctx) => {
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+
     const { deposits, total } = await depositSvc.getDeposits({
-      userId: ctx.dbUser.id,
-      page: 1,
-      limit: 5,
+      userId: user.id, page: 1, limit: 5,
     });
 
     if (deposits.length === 0) {
-      return ctx.reply('📭 لا توجد إيداعات بعد.');
+      return safeReply(ctx, '📭 لا توجد إيداعات بعد.');
     }
 
     let msg = '📥 *سجل الإيداعات الأخيرة:*\n\n';
     for (const d of deposits) {
-      const statusEmoji = { PENDING: '⏳', APPROVED: '✅', REJECTED: '❌' }[d.status] || '❓';
-      msg += `${statusEmoji} ${parseFloat(d.amountUsd).toFixed(2)}$ | ${d.method?.name || ''} | ${new Date(d.createdAt).toLocaleDateString('ar')}\n`;
+      const emoji = { PENDING: '⏳', APPROVED: '✅', REJECTED: '❌' }[d.status] || '❓';
+      msg += `${emoji} ${parseFloat(d.amountUsd).toFixed(2)}$ | ${d.method?.name || ''} | ${new Date(d.createdAt).toLocaleDateString('ar')}\n`;
     }
     msg += `\nالإجمالي: ${total} معاملة`;
-
-    await ctx.reply(msg, { parse_mode: 'Markdown' });
+    await safeReply(ctx, msg, { parse_mode: 'Markdown' });
   });
 
   bot.hears('📤 سجل السحوبات', async (ctx) => {
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+
     const { withdrawals, total } = await withdrawSvc.getWithdrawals({
-      userId: ctx.dbUser.id,
-      page: 1,
-      limit: 5,
+      userId: user.id, page: 1, limit: 5,
     });
 
     if (withdrawals.length === 0) {
-      return ctx.reply('📭 لا توجد سحوبات بعد.');
+      return safeReply(ctx, '📭 لا توجد سحوبات بعد.');
     }
 
     let msg = '📤 *سجل السحوبات الأخيرة:*\n\n';
     for (const w of withdrawals) {
-      const statusEmoji = {
-        PENDING: '⏳', APPROVED: '🔄', COMPLETED: '✅', REJECTED: '❌',
-      }[w.status] || '❓';
-      msg += `${statusEmoji} ${parseFloat(w.netAmount).toFixed(2)}$ | ${w.method?.name || ''} | ${new Date(w.createdAt).toLocaleDateString('ar')}\n`;
+      const emoji = { PENDING: '⏳', APPROVED: '🔄', COMPLETED: '✅', REJECTED: '❌' }[w.status] || '❓';
+      msg += `${emoji} ${parseFloat(w.netAmount).toFixed(2)}$ | ${w.method?.name || ''} | ${new Date(w.createdAt).toLocaleDateString('ar')}\n`;
     }
     msg += `\nالإجمالي: ${total} معاملة`;
-
-    await ctx.reply(msg, { parse_mode: 'Markdown' });
+    await safeReply(ctx, msg, { parse_mode: 'Markdown' });
   });
 
   bot.hears('📦 سجل الطلبات', async (ctx) => {
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+
     const { orders, total } = await orderSvc.getOrders({
-      userId: ctx.dbUser.id,
-      page: 1,
-      limit: 5,
+      userId: user.id, page: 1, limit: 5,
     });
 
-    if (orders.length === 0) return ctx.reply('📭 لا توجد طلبات بعد.');
+    if (orders.length === 0) return safeReply(ctx, '📭 لا توجد طلبات بعد.');
 
     let msg = '📦 *آخر الطلبات:*\n\n';
     for (const o of orders) {
-      const emoji = {
-        PENDING: '⏳', PROCESSING: '🔄', COMPLETED: '✅',
-        PARTIAL: '⚠️', CANCELLED: '🚫', FAILED: '❌',
-      }[o.status] || '❓';
-      msg += `${emoji} #${o.id} | ${o.product?.name || ''} | ${o.quantity} | ${parseFloat(o.totalPrice).toFixed(2)}$\n`;
+      const emoji = { PENDING: '⏳', PROCESSING: '🔄', COMPLETED: '✅', PARTIAL: '⚠️', CANCELLED: '🚫', FAILED: '❌' }[o.status] || '❓';
+      msg += `${emoji} #${o.id} | ${escapeMarkdown(o.product?.name || '')} | ${o.quantity} | ${parseFloat(o.totalPrice).toFixed(2)}$\n`;
     }
     msg += `\nالإجمالي: ${total} طلب`;
-
-    await ctx.reply(msg, { parse_mode: 'Markdown' });
+    await safeReply(ctx, msg, { parse_mode: 'Markdown' });
   });
 
   bot.hears('⏳ الطلبات النشطة', async (ctx) => {
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+
     const { orders } = await orderSvc.getOrders({
-      userId: ctx.dbUser.id,
-      status: 'PROCESSING',
-      limit:  10,
+      userId: user.id, status: 'PROCESSING', limit: 10,
     });
 
-    if (orders.length === 0) return ctx.reply('✅ لا توجد طلبات نشطة حالياً.');
+    if (orders.length === 0) return safeReply(ctx, '✅ لا توجد طلبات نشطة حالياً.');
 
     let msg = '⏳ *الطلبات النشطة:*\n\n';
     for (const o of orders) {
-      msg += `🔄 #${o.id} | ${o.product?.name || ''}\n`;
+      msg += `🔄 #${o.id} | ${escapeMarkdown(o.product?.name || '')}\n`;
       msg += `   الكمية: ${o.quantity} | المتبقي: ${o.remains ?? '—'}\n\n`;
     }
-
-    await ctx.reply(msg, { parse_mode: 'Markdown' });
+    await safeReply(ctx, msg, { parse_mode: 'Markdown' });
   });
 
   // ──────────────────────────────────────
   // 👥 REFERRAL
   // ──────────────────────────────────────
   bot.hears('👥 الإحالة', async (ctx) => {
-    const user  = ctx.dbUser;
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+
     const stats = await referralSvc.getReferralStats(user.id);
     const link  = `https://t.me/${config.bot.username}?start=ref_${user.referralCode}`;
 
     const msg =
       `👥 *نظام الإحالة*\n\n` +
       `🔗 رابطك الخاص:\n\`${link}\`\n\n` +
-      `👤 المستخدمون المدعوون: *${stats.invitedCount}*\n` +
+      `👤 المدعوون: *${stats.invitedCount}*\n` +
       `💰 إجمالي العمولات: *${stats.totalCommission.toFixed(2)}$*\n` +
-      `📦 الطلبات المكملة: *${stats.totalOrders}*\n\n` +
-      `💡 احصل على عمولة على كل طلب يقوم به المستخدمون المدعوون!`;
+      `📦 الطلبات المكتملة: *${stats.totalOrders}*\n\n` +
+      `💡 احصل على عمولة على كل طلب يقوم به المدعوون!`;
 
-    await ctx.reply(msg, { parse_mode: 'Markdown' });
+    await safeReply(ctx, msg, { parse_mode: 'Markdown' });
   });
 
   // ──────────────────────────────────────
   // 🎧 SUPPORT
   // ──────────────────────────────────────
   bot.hears('🎧 الدعم الفني', async (ctx) => {
-    const minLength = parseInt(
-      await settingsSvc.getSetting('support_min_length') || '20'
-    );
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+
+    const minLength = parseInt(await settingsSvc.getSetting('support_min_length') || '20');
     ctx.session.step = 'support_message';
-    await ctx.reply(
+    await safeReply(ctx,
       `🎧 *الدعم الفني*\n\nأرسل رسالتك وسيتم الرد عليها في أقرب وقت.\n_الحد الأدنى: ${minLength} حرف_`,
       { parse_mode: 'Markdown', ...keyboards.cancelButton() }
     );
@@ -518,28 +719,34 @@ function register(bot) {
   // 🔧 BOT SYSTEMS
   // ──────────────────────────────────────
   bot.hears('🔧 أنظمة البوت', async (ctx) => {
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+
     const settings = await settingsSvc.getAllSettings();
     const msg =
       `🔧 *معلومات النظام*\n\n` +
       `💱 سعر الصرف: *${settings.exchange_rate || '3.75'}*\n` +
       `📊 هامش الربح: *${((parseFloat(settings.profit_margin || '0.20')) * 100).toFixed(0)}%*\n` +
-      `🔧 الصيانة: *${settings.maintenance_mode === 'true' ? 'مفعّل' : 'غير مفعّل'}*\n` +
+      `🔧 الصيانة: *${settings.maintenance_mode === 'true' ? 'مفعّل ⚠️' : 'غير مفعّل ✅'}*\n` +
       `📢 التحقق من القناة: *${settings.channel_verification === 'true' ? 'مفعّل' : 'غير مفعّل'}*`;
 
-    await ctx.reply(msg, { parse_mode: 'Markdown' });
+    await safeReply(ctx, msg, { parse_mode: 'Markdown' });
   });
 
   // ──────────────────────────────────────
   // 📢 ANNOUNCEMENTS
   // ──────────────────────────────────────
   bot.hears('📢 الإعلانات', async (ctx) => {
+    const user = ctx.dbUser;
+    if (!user) return safeReply(ctx, '❌ أرسل /start أولاً');
+
     const latest = await prisma.broadcastLog.findFirst({
       orderBy: { createdAt: 'desc' },
     });
 
-    if (!latest) return ctx.reply('📭 لا توجد إعلانات حالياً.');
+    if (!latest) return safeReply(ctx, '📭 لا توجد إعلانات حالياً.');
 
-    await ctx.reply(
+    await safeReply(ctx,
       `📢 *آخر إعلان:*\n\n${latest.message}\n\n_${new Date(latest.createdAt).toLocaleDateString('ar')}_`,
       { parse_mode: 'Markdown' }
     );
@@ -549,24 +756,30 @@ function register(bot) {
   // ❌ CANCEL
   // ──────────────────────────────────────
   bot.hears('❌ إلغاء', async (ctx) => {
-    ctx.session.step = null;
-    ctx.session.depositMethodId        = null;
-    ctx.session.withdrawMethodId       = null;
-    ctx.session.selectedProductId      = null;
-    ctx.session.selectedManualProductId= null;
-    ctx.session.transferTarget         = null;
-    ctx.session.transferAmount         = null;
-    await ctx.reply('❌ تم الإلغاء.', keyboards.mainMenu(ctx.dbUser));
+    const user = ctx.dbUser;
+    ctx.session.step                    = null;
+    ctx.session.depositMethodId         = null;
+    ctx.session.withdrawMethodId        = null;
+    ctx.session.selectedProductId       = null;
+    ctx.session.selectedManualProductId = null;
+    ctx.session.transferTargetId        = null;
+    ctx.session.transferAmount          = null;
+    ctx.session.autoQuantity            = null;
+    ctx.session.autoLink                = null;
+    ctx.session.groupPath               = [];
+    ctx.session.selectedGroupId         = null;
+
+    await safeReply(ctx, '❌ تم الإلغاء.', user ? keyboards.mainMenu(user) : {});
   });
 
   bot.action('cancel', async (ctx) => {
     await ctx.answerCbQuery();
     ctx.session.step = null;
-    await ctx.editMessageText('❌ تم الإلغاء.');
+    await ctx.editMessageText('❌ تم الإلغاء.').catch(() => {});
   });
 
   // ──────────────────────────────────────
-  // ADMIN CALLBACK - DEPOSIT APPROVE/REJECT
+  // ADMIN CALLBACKS — DEPOSIT
   // ──────────────────────────────────────
   bot.action(/^deposit_approve_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery();
@@ -576,9 +789,12 @@ function register(bot) {
     try {
       const deposit = await depositSvc.approveDeposit(depositId, null);
       await ctx.editMessageText(`✅ تمت الموافقة على الإيداع #${depositId}`);
+      const fullDeposit = await prisma.deposit.findUnique({
+        where: { id: depositId }, include: { user: true },
+      });
       await notifySvc.notifyUserDepositApproved(
-        deposit.user?.telegramId || 0,
-        deposit.amountUsd
+        fullDeposit?.user?.telegramId,
+        fullDeposit?.amountUsd
       ).catch(() => {});
     } catch (err) {
       await ctx.answerCbQuery(`❌ ${err.message}`, { show_alert: true });
@@ -591,10 +807,13 @@ function register(bot) {
 
     const depositId = parseInt(ctx.match[1]);
     try {
-      const deposit = await depositSvc.rejectDeposit(depositId);
+      await depositSvc.rejectDeposit(depositId);
       await ctx.editMessageText(`❌ تم رفض الإيداع #${depositId}`);
+      const fullDeposit = await prisma.deposit.findUnique({
+        where: { id: depositId }, include: { user: true },
+      });
       await notifySvc.notifyUserDepositRejected(
-        deposit.user?.telegramId || 0
+        fullDeposit?.user?.telegramId
       ).catch(() => {});
     } catch (err) {
       await ctx.answerCbQuery(`❌ ${err.message}`, { show_alert: true });
@@ -602,7 +821,7 @@ function register(bot) {
   });
 
   // ──────────────────────────────────────
-  // ADMIN CALLBACK - WITHDRAW APPROVE/REJECT
+  // ADMIN CALLBACKS — WITHDRAWAL
   // ──────────────────────────────────────
   bot.action(/^withdraw_approve_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery();
@@ -631,44 +850,45 @@ function register(bot) {
   });
 
   // ──────────────────────────────────────
-  // NOOP (pagination label)
+  // NOOP
   // ──────────────────────────────────────
   bot.action('noop', (ctx) => ctx.answerCbQuery());
 
-  // ──────────────────────────────────────
-  // TEXT MESSAGE HANDLER (wizard steps)
-  // ──────────────────────────────────────
+  // ══════════════════════════════════════
+  // TEXT MESSAGE HANDLER (Wizard Steps)
+  // ══════════════════════════════════════
   bot.on('text', async (ctx) => {
     const step = ctx.session?.step;
     const text = ctx.message.text.trim();
     const user = ctx.dbUser;
 
-    if (!step) return;
+    if (!step || !user) return;
 
-    // ── DEPOSIT: amount step ──
+    // ── DEPOSIT: amount ──
     if (step === 'deposit_amount') {
       const amount = parseFloat(text);
       if (isNaN(amount) || amount <= 0) {
-        return ctx.reply('❌ أدخل مبلغاً صحيحاً');
+        return safeReply(ctx, '❌ أدخل مبلغاً صحيحاً');
       }
       ctx.session.depositAmount = amount;
       ctx.session.step = 'deposit_txid';
-      return ctx.reply('📋 أدخل رقم المعاملة (Transaction ID):', keyboards.cancelButton());
+      return safeReply(ctx, '📋 أدخل رقم المعاملة (Transaction ID):', keyboards.cancelButton());
     }
 
-    // ── DEPOSIT: transaction ID step ──
+    // ── DEPOSIT: transaction ID ──
     if (step === 'deposit_txid') {
       const txId     = text;
       const methodId = ctx.session.depositMethodId;
       const amount   = ctx.session.depositAmount;
 
       try {
-        const deposit = await depositSvc.createDeposit(user.id, methodId, amount, txId);
-        ctx.session.step = null;
+        await depositSvc.createDeposit(user.id, methodId, amount, txId);
+
+        ctx.session.step            = null;
         ctx.session.depositMethodId = null;
         ctx.session.depositAmount   = null;
 
-        await ctx.reply(
+        await safeReply(ctx,
           `✅ *تم إرسال طلب الإيداع*\n\n` +
           `💰 المبلغ: ${amount}\n` +
           `🔢 رقم المعاملة: \`${txId}\`\n` +
@@ -676,60 +896,64 @@ function register(bot) {
           { parse_mode: 'Markdown', ...keyboards.mainMenu(user) }
         );
       } catch (err) {
-        await ctx.reply(`❌ ${err.message}`);
+        await safeReply(ctx, `❌ ${err.message}`);
       }
       return;
     }
 
-    // ── WITHDRAW: amount step ──
+    // ── WITHDRAW: amount ──
     if (step === 'withdraw_amount') {
       const amount = parseFloat(text);
-      if (isNaN(amount) || amount <= 0) return ctx.reply('❌ أدخل مبلغاً صحيحاً');
+      if (isNaN(amount) || amount <= 0) {
+        return safeReply(ctx, '❌ أدخل مبلغاً صحيحاً');
+      }
 
       const method = await prisma.withdrawMethod.findUnique({
         where: { id: ctx.session.withdrawMethodId },
       });
+      if (!method) return safeReply(ctx, '❌ الطريقة غير موجودة');
+
       const { fee, netAmount } = withdrawSvc.calculateFee(method, amount);
 
       ctx.session.withdrawAmount = amount;
       ctx.session.step = 'withdraw_account';
 
-      return ctx.reply(
+      return safeReply(ctx,
         `💸 المبلغ: ${amount}$\n💳 الرسوم: ${fee}$\n✅ الصافي: ${netAmount}$\n\nأدخل معلومات حسابك:`,
         keyboards.cancelButton()
       );
     }
 
-    // ── WITHDRAW: account info step ──
+    // ── WITHDRAW: account info ──
     if (step === 'withdraw_account') {
       const accountInfo = text;
       const methodId    = ctx.session.withdrawMethodId;
       const amount      = ctx.session.withdrawAmount;
 
       try {
-        const currentUser = await userSvc.getUserById(user.id);
-        const method      = await prisma.withdrawMethod.findUnique({ where: { id: methodId } });
-        const withdrawal  = await withdrawSvc.createWithdrawal(
+        const freshUser = await userSvc.getUserById(user.id);
+        const method    = await prisma.withdrawMethod.findUnique({ where: { id: methodId } });
+        const withdrawal = await withdrawSvc.createWithdrawal(
           user.id, methodId, amount, accountInfo
         );
 
-        await notifySvc.notifyAdminsWithdrawal(withdrawal, currentUser, method).catch(() => {});
+        await notifySvc.notifyAdminsWithdrawal(withdrawal, freshUser, method).catch(() => {});
 
-        ctx.session.step = null;
+        ctx.session.step             = null;
         ctx.session.withdrawMethodId = null;
         ctx.session.withdrawAmount   = null;
 
-        await ctx.reply(
+        await safeReply(ctx,
           `✅ *تم إرسال طلب السحب*\n\nالمبلغ: ${amount}$\n⏳ بانتظار المعالجة...`,
           { parse_mode: 'Markdown', ...keyboards.mainMenu(user) }
         );
       } catch (err) {
-        await ctx.reply(`❌ ${err.message}`);
+        await safeReply(ctx, `❌ ${err.message}`);
       }
       return;
     }
 
-    // ── TRANSFER: find user step ──
+    // ── TRANSFER: find user ──
     if (step === 'transfer_user') {
       let target;
       const numId = parseInt(text);
@@ -742,105 +966,104 @@ function register(bot) {
         });
       }
 
-      if (!target) return ctx.reply('❌ المستخدم غير موجود');
-      if (target.id === user.id) return ctx.reply('❌ لا يمكن التحويل لنفسك');
+      if (!target)                    return safeReply(ctx, '❌ المستخدم غير موجود');
+      if (target.id === user.id)      return safeReply(ctx, '❌ لا يمكن التحويل لنفسك');
+      if (target.isBanned)            return safeReply(ctx, '❌ هذا الحساب محظور');
 
       ctx.session.transferTargetId = target.id;
       ctx.session.step = 'transfer_amount';
 
-      return ctx.reply(
+      return safeReply(ctx,
         `👤 المستلم: *${escapeMarkdown(target.firstName)}*\n\nأدخل المبلغ بالدولار:`,
         { parse_mode: 'Markdown', ...keyboards.cancelButton() }
       );
     }
 
-    // ── TRANSFER: amount step ──
+    // ── TRANSFER: amount ──
     if (step === 'transfer_amount') {
       const amount = parseFloat(text);
-      if (isNaN(amount) || amount <= 0) return ctx.reply('❌ أدخل مبلغاً صحيحاً');
+      if (isNaN(amount) || amount <= 0) return safeReply(ctx, '❌ أدخل مبلغاً صحيحاً');
 
       try {
         await walletSvc.transferBalance(user.id, ctx.session.transferTargetId, amount);
         const target = await userSvc.getUserById(ctx.session.transferTargetId);
 
-        ctx.session.step = null;
+        ctx.session.step             = null;
         ctx.session.transferTargetId = null;
 
-        await ctx.reply(
+        await safeReply(ctx,
           `✅ تم تحويل *${amount}$* إلى *${escapeMarkdown(target.firstName)}* بنجاح`,
           { parse_mode: 'Markdown', ...keyboards.mainMenu(user) }
         );
       } catch (err) {
-        await ctx.reply(`❌ ${err.message}`);
+        await safeReply(ctx, `❌ ${err.message}`);
       }
       return;
     }
 
-    // ── AUTO SERVICE: quantity step ──
+    // ── AUTO SERVICE: quantity ──
     if (step === 'auto_quantity') {
       const qty = parseInt(text);
-      if (isNaN(qty) || qty <= 0) return ctx.reply('❌ أدخل كمية صحيحة');
+      if (isNaN(qty) || qty <= 0) return safeReply(ctx, '❌ أدخل كمية صحيحة');
+
+      const product = await prisma.product.findUnique({
+        where: { id: ctx.session.selectedProductId },
+      });
+      if (!product) return safeReply(ctx, '❌ الخدمة غير موجودة. ابدأ من جديد.');
+
+      if (qty < product.minQuantity) {
+        return safeReply(ctx, `❌ الحد الأدنى للكمية هو ${product.minQuantity}`);
+      }
+      if (qty > product.maxQuantity) {
+        return safeReply(ctx, `❌ الحد الأقصى للكمية هو ${product.maxQuantity}`);
+      }
 
       ctx.session.autoQuantity = qty;
       ctx.session.step = 'auto_link';
 
-      return ctx.reply('🔗 أدخل رابط الحساب:', keyboards.cancelButton());
+      return safeReply(ctx, '🔗 أدخل رابط الحساب:', keyboards.cancelButton());
     }
 
-
-
-    // ── AUTO SERVICE: link step ──
+    // ── AUTO SERVICE: link ──
     if (step === 'auto_link') {
       const link      = text;
       const productId = ctx.session.selectedProductId;
       const quantity  = ctx.session.autoQuantity;
 
-      // ⚠️ الإصلاح: حفظ الرابط وتغيير الـ step قبل فحص التكرار
-      // حتى إذا كان مكرراً يظل المستخدم على step = auto_confirm
       ctx.session.autoLink = link;
       ctx.session.step     = 'auto_confirm';
 
       const product  = await prisma.product.findUnique({
-        where: { id: productId },
-        include: { group: true },
+        where: { id: productId }, include: { group: true },
       });
 
       if (!product) {
         ctx.session.step = null;
-        return ctx.reply('❌ الخدمة غير موجودة. يرجى المحاولة مجدداً.', keyboards.mainMenu(user));
+        return safeReply(ctx, '❌ الخدمة غير موجودة. ابدأ من جديد.', keyboards.mainMenu(user));
       }
 
       const settings = await settingsSvc.getAllSettings();
       const rate     = parseFloat(settings.exchange_rate || '3.75');
       const margin   = parseFloat(settings.profit_margin || '0.20');
-      const discount = await getVipDiscountLocal(user.vipLevel, settings);
+      const discount = await getVipDiscount(user.vipLevel, settings);
 
       const pricePerUnit = parseFloat(product.priceUsd) * (1 + margin) * (1 - discount);
       const totalLocal   = (pricePerUnit * quantity * rate).toFixed(4);
 
-      // فحص التكرار — الآن يظهر رسالة تأكيد مختلفة لكن يبقى step على auto_confirm
       const isDuplicate = await orderSvc.checkDuplicateOrder(user.id, productId);
-      if (isDuplicate) {
-        return ctx.reply(
-          `⚠️ *لديك طلب مماثل في آخر 5 دقائق!*\n\n` +
-          `📦 الخدمة: ${product.name}\n` +
-          `🔢 الكمية: ${quantity}\n` +
-          `🔗 الرابط: \`${link}\`\n` +
-          `💰 الإجمالي: *${totalLocal}$*\n\n` +
-          `هل تريد المتابعة رغم ذلك؟`,
-          { parse_mode: 'Markdown', ...keyboards.confirmCancel() }
-        );
-      }
 
-      return ctx.reply(
-        `📋 *تأكيد الطلب*\n\n` +
-        `📦 الخدمة: ${product.name}\n` +
+      const confirmMsg =
+        (isDuplicate ? `⚠️ *لديك طلب مماثل في آخر 5 دقائق!*\n\n` : `📋 *تأكيد الطلب*\n\n`) +
+        `📦 الخدمة: ${escapeMarkdown(product.name)}\n` +
         `🔢 الكمية: ${quantity}\n` +
         `🔗 الرابط: \`${link}\`\n` +
         `💰 الإجمالي: *${totalLocal}$*\n\n` +
-        `هل تريد تأكيد الطلب؟`,
-        { parse_mode: 'Markdown', ...keyboards.confirmCancel() }
-      );
+        (isDuplicate ? `هل تريد المتابعة رغم ذلك؟` : `هل تريد تأكيد الطلب؟`);
+
+      return safeReply(ctx, confirmMsg, {
+        parse_mode: 'Markdown',
+        ...keyboards.confirmCancel(),
+      });
     }
 
     // ── AUTO SERVICE: confirm ──
@@ -854,50 +1077,67 @@ function register(bot) {
             ctx.session.autoLink
           );
 
-          ctx.session.step = null;
+          ctx.session.step              = null;
           ctx.session.selectedProductId = null;
-          ctx.session.autoQuantity = null;
-          ctx.session.autoLink = null;
+          ctx.session.autoQuantity      = null;
+          ctx.session.autoLink          = null;
 
-          await ctx.reply(
+          await safeReply(ctx,
             `✅ *تم إنشاء الطلب بنجاح*\n\n🆔 رقم الطلب: \`${order.id}\`\n⏳ جاري المعالجة...`,
             { parse_mode: 'Markdown', ...keyboards.mainMenu(user) }
           );
         } catch (err) {
-          await ctx.reply(`❌ ${err.message}`);
+          await safeReply(ctx, `❌ ${err.message}`);
         }
       } else {
         ctx.session.step = null;
-        await ctx.reply('❌ تم الإلغاء.', keyboards.mainMenu(user));
+        await safeReply(ctx, '❌ تم الإلغاء.', keyboards.mainMenu(user));
       }
       return;
     }
 
-    // ── MANUAL SERVICE: quantity step ──
+    // ── MANUAL SERVICE: quantity ──
     if (step === 'manual_quantity') {
       const qty = parseInt(text);
-      if (isNaN(qty) || qty <= 0) return ctx.reply('❌ أدخل كمية صحيحة');
+      if (isNaN(qty) || qty <= 0) return safeReply(ctx, '❌ أدخل كمية صحيحة');
+
+      const product = await prisma.product.findUnique({
+        where: { id: ctx.session.selectedManualProductId },
+      });
+      if (!product) return safeReply(ctx, '❌ المنتج غير موجود. ابدأ من جديد.');
+
+      if (qty < product.minQuantity) {
+        return safeReply(ctx, `❌ الحد الأدنى للكمية هو ${product.minQuantity}`);
+      }
+      if (qty > product.maxQuantity) {
+        return safeReply(ctx, `❌ الحد الأقصى للكمية هو ${product.maxQuantity}`);
+      }
 
       ctx.session.manualQuantity = qty;
       ctx.session.step = 'manual_account';
 
-      return ctx.reply('📋 أدخل معلومات الحساب:', keyboards.cancelButton());
+      return safeReply(ctx, '📋 أدخل معلومات الحساب:', keyboards.cancelButton());
     }
 
-    // ── MANUAL SERVICE: account info step ──
+    // ── MANUAL SERVICE: account info ──
     if (step === 'manual_account') {
       ctx.session.manualAccountInfo = text;
       ctx.session.step = 'manual_confirm';
 
       const productId = ctx.session.selectedManualProductId;
       const product   = await prisma.product.findUnique({ where: { id: productId } });
-      const settings  = await settingsSvc.getAllSettings();
-      const rate      = parseFloat(settings.exchange_rate || '3.75');
-      const total     = (parseFloat(product.priceUsd) * ctx.session.manualQuantity * rate).toFixed(4);
+      if (!product) {
+        ctx.session.step = null;
+        return safeReply(ctx, '❌ المنتج غير موجود. ابدأ من جديد.', keyboards.mainMenu(user));
+      }
 
-      return ctx.reply(
+      const settings = await settingsSvc.getAllSettings();
+      const rate     = parseFloat(settings.exchange_rate || '3.75');
+      const total    = (parseFloat(product.priceUsd) * ctx.session.manualQuantity * rate).toFixed(4);
+
+      return safeReply(ctx,
         `📋 *تأكيد الطلب اليدوي*\n\n` +
-        `📦 الخدمة: ${product.name}\n` +
+        `📦 الخدمة: ${escapeMarkdown(product.name)}\n` +
         `🔢 الكمية: ${ctx.session.manualQuantity}\n` +
         `📋 الحساب: ${text}\n` +
         `💰 الإجمالي: *${total}$*\n\nهل تريد تأكيد الطلب؟`,
@@ -916,33 +1156,33 @@ function register(bot) {
             ctx.session.manualAccountInfo
           );
 
-          ctx.session.step = null;
+          ctx.session.step                    = null;
           ctx.session.selectedManualProductId = null;
-          ctx.session.manualQuantity = null;
-          ctx.session.manualAccountInfo = null;
+          ctx.session.manualQuantity          = null;
+          ctx.session.manualAccountInfo       = null;
 
-          await ctx.reply(
+          await safeReply(ctx,
             `✅ *تم إرسال الطلب اليدوي*\n\n🆔 رقم الطلب: \`${order.id}\`\n⏳ بانتظار موافقة المدير`,
             { parse_mode: 'Markdown', ...keyboards.mainMenu(user) }
           );
         } catch (err) {
-          await ctx.reply(`❌ ${err.message}`);
+          await safeReply(ctx, `❌ ${err.message}`);
         }
       } else {
         ctx.session.step = null;
-        await ctx.reply('❌ تم الإلغاء.', keyboards.mainMenu(user));
+        await safeReply(ctx, '❌ تم الإلغاء.', keyboards.mainMenu(user));
       }
       return;
     }
 
-    // ── SUPPORT: message step ──
+    // ── SUPPORT: message ──
     if (step === 'support_message') {
       const minLength = parseInt(
         await settingsSvc.getSetting('support_min_length') || '20'
       );
 
       if (text.length < minLength) {
-        return ctx.reply(`❌ الرسالة قصيرة جداً. الحد الأدنى ${minLength} حرف.`);
+        return safeReply(ctx, `❌ الرسالة قصيرة جداً. الحد الأدنى ${minLength} حرف.`);
       }
 
       const freshUser = await userSvc.getUserById(user.id);
@@ -951,11 +1191,10 @@ function register(bot) {
         data: { userId: user.id, message: text },
       });
 
-      // Forward to support channel
       const { bot } = require('./bot');
       const supportMsg =
         `🎧 *رسالة دعم جديدة*\n\n` +
-        `👤 ${freshUser.firstName}\n` +
+        `👤 ${escapeMarkdown(freshUser.firstName)}\n` +
         `🆔 ID: \`${freshUser.id}\`\n` +
         `📱 Telegram: \`${freshUser.telegramId}\`\n` +
         `💰 الرصيد: ${formatBalance(freshUser.balance)}$\n\n` +
@@ -969,26 +1208,13 @@ function register(bot) {
 
       ctx.session.step = null;
 
-      await ctx.reply(
+      await safeReply(ctx,
         '✅ تم إرسال رسالتك للدعم الفني. سيتم الرد عليك قريباً.',
         keyboards.mainMenu(user)
       );
       return;
     }
   });
-}
-
-// ─────────────────────────────────────────
-// HELPER - GET VIP DISCOUNT FROM SETTINGS
-// ─────────────────────────────────────────
-async function getVipDiscountLocal(vipLevel, settings) {
-  const map = {
-    NORMAL: 0,
-    BRONZE: parseFloat(settings.vip_bronze_discount || '0.02'),
-    SILVER: parseFloat(settings.vip_silver_discount || '0.05'),
-    GOLD:   parseFloat(settings.vip_gold_discount   || '0.10'),
-  };
-  return map[vipLevel] || 0;
 }
 
 module.exports = { register, notifyReferrer };

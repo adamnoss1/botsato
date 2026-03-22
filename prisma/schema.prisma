@@ -61,35 +61,36 @@ enum SupportStatus {
 // ─────────────────────────────────────────
 
 model User {
-  id              Int      @id @default(autoincrement())
-  telegramId      BigInt   @unique
-  username        String?
-  firstName       String
-  lastName        String?
-  email           String?
-  balance         Decimal  @default(0) @db.Decimal(18, 4)
-  totalDeposited  Decimal  @default(0) @db.Decimal(18, 4)
-  vipLevel        VipLevel @default(NORMAL)
-  referralCode    String   @unique
-  referredById    Int?
-  referredBy      User?    @relation("Referrals", fields: [referredById], references: [id])
-  referrals       User[]   @relation("Referrals")
-  isBanned        Boolean  @default(false)
-  banReason       String?
-  isActive        Boolean  @default(true)
-  lastSeenAt      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             Int       @id @default(autoincrement())
+  telegramId     BigInt    @unique
+  username       String?
+  firstName      String
+  lastName       String?
+  email          String?
+  balance        Decimal   @default(0) @db.Decimal(18, 4)
+  totalDeposited Decimal   @default(0) @db.Decimal(18, 4)
+  vipLevel       VipLevel  @default(NORMAL)
+  referralCode   String    @unique
+  referredById   Int?
+  referredBy     User?     @relation("UserReferrals", fields: [referredById], references: [id])
+  referrals      User[]    @relation("UserReferrals")
+  isBanned       Boolean   @default(false)
+  banReason      String?
+  isActive       Boolean   @default(true)
+  lastSeenAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   deposits        Deposit[]
   withdrawals     Withdrawal[]
   orders          Order[]
   manualOrders    ManualOrder[]
-  transactions    WalletTransaction[]
-  referralGiven   Referral[]  @relation("ReferralFrom")
-  referralEarned  Referral[]  @relation("ReferralTo")
-  supportMessages SupportMessage[]
+  // ← الإصلاح الحرجي: اسم صريح للعلاقتين
+  transactions    WalletTransaction[] @relation("UserTransactions")
   transfersOut    WalletTransaction[] @relation("TransferOut")
+  referralGiven   Referral[]          @relation("ReferralFrom")
+  referralEarned  Referral[]          @relation("ReferralTo")
+  supportMessages SupportMessage[]
 
   @@index([telegramId])
   @@index([referralCode])
@@ -102,19 +103,19 @@ model User {
 // ─────────────────────────────────────────
 
 model Admin {
-  id           Int      @id @default(autoincrement())
-  username     String   @unique
+  id           Int       @id @default(autoincrement())
+  username     String    @unique
   passwordHash String
   telegramId   BigInt?
-  isSuperAdmin Boolean  @default(false)
-  isActive     Boolean  @default(true)
-  failedLogins Int      @default(0)
+  isSuperAdmin Boolean   @default(false)
+  isActive     Boolean   @default(true)
+  failedLogins Int       @default(0)
   lockedUntil  DateTime?
   lastLoginAt  DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  auditLogs    AuditLog[]
+  auditLogs AuditLog[]
 
   @@map("admins")
 }
@@ -124,18 +125,20 @@ model Admin {
 // ─────────────────────────────────────────
 
 model WalletTransaction {
-  id          Int             @id @default(autoincrement())
-  userId      Int
-  user        User            @relation(fields: [userId], references: [id])
-  type        TransactionType
-  amount      Decimal         @db.Decimal(18, 4)
-  balanceBefore Decimal       @db.Decimal(18, 4)
-  balanceAfter  Decimal       @db.Decimal(18, 4)
-  description String?
-  refId       String?
-  transferToId Int?
-  transferTo  User?           @relation("TransferOut", fields: [transferToId], references: [id])
-  createdAt   DateTime        @default(now())
+  id            Int             @id @default(autoincrement())
+  userId        Int
+  // ← الإصلاح: اسم صريح يطابق ما في User
+  user          User            @relation("UserTransactions", fields: [userId], references: [id])
+  type          TransactionType
+  amount        Decimal         @db.Decimal(18, 4)
+  balanceBefore Decimal         @db.Decimal(18, 4)
+  balanceAfter  Decimal         @db.Decimal(18, 4)
+  description   String?
+  refId         String?
+  transferToId  Int?
+  // ← الإصلاح: اسم صريح يطابق ما في User
+  transferTo    User?           @relation("TransferOut", fields: [transferToId], references: [id])
+  createdAt     DateTime        @default(now())
 
   @@index([userId])
   @@index([type])
@@ -161,28 +164,28 @@ model DepositMethod {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  deposits     Deposit[]
+  deposits Deposit[]
 
   @@map("deposit_methods")
 }
 
 model Deposit {
-  id              Int           @id @default(autoincrement())
-  userId          Int
-  user            User          @relation(fields: [userId], references: [id])
-  methodId        Int
-  method          DepositMethod @relation(fields: [methodId], references: [id])
-  amountLocal     Decimal       @db.Decimal(18, 4)
-  amountUsd       Decimal       @db.Decimal(18, 4)
-  exchangeRate    Decimal       @db.Decimal(18, 6)
-  transactionId   String
-  status          DepositStatus @default(PENDING)
-  adminNote       String?
-  approvedAt      DateTime?
-  rejectedAt      DateTime?
-  notifiedAdmins  Boolean       @default(false)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id             Int           @id @default(autoincrement())
+  userId         Int
+  user           User          @relation(fields: [userId], references: [id])
+  methodId       Int
+  method         DepositMethod @relation(fields: [methodId], references: [id])
+  amountLocal    Decimal       @db.Decimal(18, 4)
+  amountUsd      Decimal       @db.Decimal(18, 4)
+  exchangeRate   Decimal       @db.Decimal(18, 6)
+  transactionId  String
+  status         DepositStatus @default(PENDING)
+  adminNote      String?
+  approvedAt     DateTime?
+  rejectedAt     DateTime?
+  notifiedAdmins Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   @@unique([transactionId, methodId])
   @@index([userId])
@@ -214,22 +217,22 @@ model WithdrawMethod {
 }
 
 model Withdrawal {
-  id           Int            @id @default(autoincrement())
-  userId       Int
-  user         User           @relation(fields: [userId], references: [id])
-  methodId     Int
-  method       WithdrawMethod @relation(fields: [methodId], references: [id])
-  amount       Decimal        @db.Decimal(18, 4)
-  fee          Decimal        @db.Decimal(18, 4)
-  netAmount    Decimal        @db.Decimal(18, 4)
-  accountInfo  String
-  status       WithdrawStatus @default(PENDING)
-  adminNote    String?
-  approvedAt   DateTime?
-  completedAt  DateTime?
-  rejectedAt   DateTime?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id          Int            @id @default(autoincrement())
+  userId      Int
+  user        User           @relation(fields: [userId], references: [id])
+  methodId    Int
+  method      WithdrawMethod @relation(fields: [methodId], references: [id])
+  amount      Decimal        @db.Decimal(18, 4)
+  fee         Decimal        @db.Decimal(18, 4)
+  netAmount   Decimal        @db.Decimal(18, 4)
+  accountInfo String
+  status      WithdrawStatus @default(PENDING)
+  adminNote   String?
+  approvedAt  DateTime?
+  completedAt DateTime?
+  rejectedAt  DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 
   @@index([userId])
   @@index([status])
@@ -237,44 +240,49 @@ model Withdrawal {
 }
 
 // ─────────────────────────────────────────
-// PRODUCTS
+// PRODUCTS & GROUPS
 // ─────────────────────────────────────────
 
 model ProductGroup {
-  id          Int       @id @default(autoincrement())
-  name        String
-  nameAr      String?
-  satofillId  String?
-  isActive    Boolean   @default(true)
-  sortOrder   Int       @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id        Int      @id @default(autoincrement())
+  name      String
+  nameAr    String?
+  // التصنيف الأب (null = تصنيف رئيسي)
+  parentId  Int?
+  parent    ProductGroup?  @relation("GroupHierarchy", fields: [parentId], references: [id])
+  children  ProductGroup[] @relation("GroupHierarchy")
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  products    Product[]
+  products Product[]
 
+  @@index([parentId])
   @@map("product_groups")
+  @@unique([name, parentId])
 }
 
 model Product {
-  id            Int          @id @default(autoincrement())
-  groupId       Int
-  group         ProductGroup @relation(fields: [groupId], references: [id])
-  satofillId    String?      @unique
-  name          String
-  nameAr        String?
-  description   String?
-  priceUsd      Decimal      @db.Decimal(18, 6)
-  profitMargin  Decimal      @default(0.20) @db.Decimal(5, 4)
-  minQuantity   Int          @default(100)
-  maxQuantity   Int          @default(100000)
-  isManual      Boolean      @default(false)
-  isActive      Boolean      @default(true)
-  sortOrder     Int          @default(0)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  id           Int          @id @default(autoincrement())
+  groupId      Int
+  group        ProductGroup @relation(fields: [groupId], references: [id])
+  satofillId   String?      @unique
+  name         String
+  nameAr       String?
+  description  String?
+  priceUsd     Decimal      @db.Decimal(18, 6)
+  profitMargin Decimal      @default(0.20) @db.Decimal(5, 4)
+  minQuantity  Int          @default(1)
+  maxQuantity  Int          @default(100000)
+  isManual     Boolean      @default(false)
+  isActive     Boolean      @default(true)
+  sortOrder    Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
-  orders        Order[]
-  manualOrders  ManualOrder[]
+  orders       Order[]
+  manualOrders ManualOrder[]
 
   @@index([groupId])
   @@index([satofillId])
@@ -335,15 +343,15 @@ model ManualOrder {
 // ─────────────────────────────────────────
 
 model Referral {
-  id           Int      @id @default(autoincrement())
-  fromUserId   Int
-  fromUser     User     @relation("ReferralFrom", fields: [fromUserId], references: [id])
-  toUserId     Int
-  toUser       User     @relation("ReferralTo", fields: [toUserId], references: [id])
-  orderId      Int?
-  order        Order?   @relation(fields: [orderId], references: [id])
-  commission   Decimal  @db.Decimal(18, 4)
-  createdAt    DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  fromUserId Int
+  fromUser   User     @relation("ReferralFrom", fields: [fromUserId], references: [id])
+  toUserId   Int
+  toUser     User     @relation("ReferralTo", fields: [toUserId], references: [id])
+  orderId    Int?
+  order      Order?   @relation(fields: [orderId], references: [id])
+  commission Decimal  @db.Decimal(18, 4)
+  createdAt  DateTime @default(now())
 
   @@index([fromUserId])
   @@index([toUserId])
@@ -387,15 +395,15 @@ model SupportMessage {
 // ─────────────────────────────────────────
 
 model AuditLog {
-  id        Int      @id @default(autoincrement())
-  adminId   Int?
-  admin     Admin?   @relation(fields: [adminId], references: [id])
-  action    String
+  id         Int      @id @default(autoincrement())
+  adminId    Int?
+  admin      Admin?   @relation(fields: [adminId], references: [id])
+  action     String
   targetType String?
-  targetId  Int?
-  details   Json?
-  ipAddress String?
-  createdAt DateTime @default(now())
+  targetId   Int?
+  details    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
 
   @@index([adminId])
   @@index([action])

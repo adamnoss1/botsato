@@ -23,12 +23,20 @@ const auditCtrl       = require('../controllers/auditController');
 const backupCtrl      = require('../controllers/backupController');
 
 // ─────────────────────────────────────────
+// ROOT — /admin → /admin/dashboard
+// ─────────────────────────────────────────
+router.get('/', (req, res) => {
+  if (req.session?.admin) return res.redirect('/admin/dashboard');
+  return res.redirect('/admin/login');
+});
+
+// ─────────────────────────────────────────
 // AUTH
 // ─────────────────────────────────────────
 router.get('/login', (req, res) => {
   if (req.session?.admin) return res.redirect('/admin/dashboard');
   res.render('login', {
-    error:     res.locals.error || null,
+    error:     res.locals.error   || null,
     csrfToken: res.locals.csrfToken || '',
   });
 });
@@ -55,59 +63,57 @@ router.post('/users/:id/referral', authMiddleware, superAdminOnly, usersCtrl.cha
 // ─────────────────────────────────────────
 // DEPOSITS
 // ─────────────────────────────────────────
-router.get('/deposits',               authMiddleware, depositsCtrl.index);
-router.post('/deposits/:id/approve',  authMiddleware, depositsCtrl.approve);
-router.post('/deposits/:id/reject',   authMiddleware, depositsCtrl.reject);
+router.get('/deposits',              authMiddleware, depositsCtrl.index);
+router.post('/deposits/:id/approve', authMiddleware, depositsCtrl.approve);
+router.post('/deposits/:id/reject',  authMiddleware, depositsCtrl.reject);
 
 // ─────────────────────────────────────────
 // WITHDRAWALS
 // ─────────────────────────────────────────
-router.get('/withdrawals',                authMiddleware, withdrawalsCtrl.index);
-router.post('/withdrawals/:id/approve',   authMiddleware, withdrawalsCtrl.approve);
-router.post('/withdrawals/:id/complete',  authMiddleware, withdrawalsCtrl.complete);
-router.post('/withdrawals/:id/reject',    authMiddleware, withdrawalsCtrl.reject);
+router.get('/withdrawals',               authMiddleware, withdrawalsCtrl.index);
+router.post('/withdrawals/:id/approve',  authMiddleware, withdrawalsCtrl.approve);
+router.post('/withdrawals/:id/complete', authMiddleware, withdrawalsCtrl.complete);
+router.post('/withdrawals/:id/reject',   authMiddleware, withdrawalsCtrl.reject);
 
 // ─────────────────────────────────────────
 // ORDERS
 // ─────────────────────────────────────────
-router.get('/orders',                      authMiddleware, ordersCtrl.index);
-router.get('/orders/manual',               authMiddleware, ordersCtrl.manualIndex);
-router.post('/orders/:id/status',          authMiddleware, ordersCtrl.updateStatus);
-router.post('/orders/manual/:id/status',   authMiddleware, ordersCtrl.updateManualStatus);
+router.get('/orders',                    authMiddleware, ordersCtrl.index);
+router.get('/orders/manual',             authMiddleware, ordersCtrl.manualIndex);
+router.post('/orders/:id/status',        authMiddleware, ordersCtrl.updateStatus);
+router.post('/orders/manual/:id/status', authMiddleware, ordersCtrl.updateManualStatus);
 
 // ─────────────────────────────────────────
 // PRODUCTS
+// ⚠️ المسارات الثابتة قبل الديناميكية (:id)
 // ─────────────────────────────────────────
-router.get('/products',             authMiddleware, productsCtrl.index);
-router.get('/products/create',      authMiddleware, productsCtrl.createForm);
-router.post('/products',            authMiddleware, productsCtrl.create);
-
-// ⚠️ الإصلاح الحرجي: يجب أن تأتي المسارات الثابتة (sync) قبل الديناميكية (:id)
-router.post('/products/sync',       authMiddleware, productsCtrl.syncSatofill);
-
-router.get('/products/:id/edit',    authMiddleware, productsCtrl.editForm);
-router.post('/products/:id',        authMiddleware, productsCtrl.update);
+router.get('/products',           authMiddleware, productsCtrl.index);
+router.get('/products/create',    authMiddleware, productsCtrl.createForm);
+router.post('/products',          authMiddleware, productsCtrl.create);
+router.post('/products/sync',     authMiddleware, productsCtrl.syncSatofill);
+router.get('/products/:id/edit',  authMiddleware, productsCtrl.editForm);
+router.post('/products/:id',      authMiddleware, productsCtrl.update);
 router.post('/products/:id/delete', authMiddleware, superAdminOnly, productsCtrl.delete);
 
 // ─────────────────────────────────────────
 // DEPOSIT METHODS
 // ─────────────────────────────────────────
-router.get('/deposit-methods',              authMiddleware, methodsCtrl.depositIndex);
-router.get('/deposit-methods/create',       authMiddleware, methodsCtrl.depositCreateForm);
-router.post('/deposit-methods',             authMiddleware, methodsCtrl.depositCreate);
-router.get('/deposit-methods/:id/edit',     authMiddleware, methodsCtrl.depositEditForm);
-router.post('/deposit-methods/:id',         authMiddleware, methodsCtrl.depositUpdate);
-router.post('/deposit-methods/:id/toggle',  authMiddleware, methodsCtrl.depositToggle);
+router.get('/deposit-methods',             authMiddleware, methodsCtrl.depositIndex);
+router.get('/deposit-methods/create',      authMiddleware, methodsCtrl.depositCreateForm);
+router.post('/deposit-methods',            authMiddleware, methodsCtrl.depositCreate);
+router.get('/deposit-methods/:id/edit',    authMiddleware, methodsCtrl.depositEditForm);
+router.post('/deposit-methods/:id',        authMiddleware, methodsCtrl.depositUpdate);
+router.post('/deposit-methods/:id/toggle', authMiddleware, methodsCtrl.depositToggle);
 
 // ─────────────────────────────────────────
 // WITHDRAW METHODS
 // ─────────────────────────────────────────
-router.get('/withdraw-methods',              authMiddleware, methodsCtrl.withdrawIndex);
-router.get('/withdraw-methods/create',       authMiddleware, methodsCtrl.withdrawCreateForm);
-router.post('/withdraw-methods',             authMiddleware, methodsCtrl.withdrawCreate);
-router.get('/withdraw-methods/:id/edit',     authMiddleware, methodsCtrl.withdrawEditForm);
-router.post('/withdraw-methods/:id',         authMiddleware, methodsCtrl.withdrawUpdate);
-router.post('/withdraw-methods/:id/toggle',  authMiddleware, methodsCtrl.withdrawToggle);
+router.get('/withdraw-methods',             authMiddleware, methodsCtrl.withdrawIndex);
+router.get('/withdraw-methods/create',      authMiddleware, methodsCtrl.withdrawCreateForm);
+router.post('/withdraw-methods',            authMiddleware, methodsCtrl.withdrawCreate);
+router.get('/withdraw-methods/:id/edit',    authMiddleware, methodsCtrl.withdrawEditForm);
+router.post('/withdraw-methods/:id',        authMiddleware, methodsCtrl.withdrawUpdate);
+router.post('/withdraw-methods/:id/toggle', authMiddleware, methodsCtrl.withdrawToggle);
 
 // ─────────────────────────────────────────
 // BROADCAST

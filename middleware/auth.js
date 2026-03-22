@@ -1,10 +1,11 @@
+// middleware/auth.js
 const bcrypt = require('bcryptjs');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const config = require('../config/settings');
 
 // ─────────────────────────────────────────
-// CHECK IF ADMIN IS LOGGED IN
+// AUTH MIDDLEWARE — التحقق من تسجيل الدخول
 // ─────────────────────────────────────────
 function authMiddleware(req, res, next) {
   if (req.session && req.session.admin) {
@@ -31,32 +32,41 @@ async function handleLogin(req, res) {
   const { username, password } = req.body;
 
   if (!username || !password) {
-    return res.render('login', { error: 'يرجى إدخال اسم المستخدم وكلمة المرور' });
+    return res.render('login', {
+      error:     'يرجى إدخال اسم المستخدم وكلمة المرور',
+      csrfToken: res.locals.csrfToken || '',
+    });
   }
 
   try {
     const admin = await prisma.admin.findUnique({ where: { username } });
 
+    // المستخدم غير موجود أو غير نشط
     if (!admin || !admin.isActive) {
-      return res.render('login', { error: 'بيانات الدخول غير صحيحة' });
-    }
-
-    // Check if account is locked
-    if (admin.lockedUntil && admin.lockedUntil > new Date()) {
-      const minutesLeft = Math.ceil((admin.lockedUntil - new Date()) / 60000);
       return res.render('login', {
-        error: `الحساب مقفل. يرجى الانتظار ${minutesLeft} دقيقة`,
+        error:     'بيانات الدخول غير صحيحة',
+        csrfToken: res.locals.csrfToken || '',
       });
     }
 
+    // فحص قفل الحساب
+    if (admin.lockedUntil && admin.lockedUntil > new Date()) {
+      const minutesLeft = Math.ceil((admin.lockedUntil - new Date()) / 60000);
+      return res.render('login', {
+        error:     `الحساب مقفل. يرجى الانتظار ${minutesLeft} دقيقة`,
+        csrfToken: res.locals.csrfToken || '',
+      });
+    }
+
+    // التحقق من كلمة المرور
     const isMatch = await bcrypt.compare(password, admin.passwordHash);
 
     if (!isMatch) {
       const newFailedCount = admin.failedLogins + 1;
-      const updateData = { failedLogins: newFailedCount };
+      const updateData     = { failedLogins: newFailedCount };
 
       if (newFailedCount >= config.security.maxLoginAttempts) {
-        updateData.lockedUntil = new Date(
+        updateData.lockedUntil  = new Date(
           Date.now() + config.security.lockDurationMinutes * 60 * 1000
         );
         updateData.failedLogins = 0;
@@ -65,35 +75,55 @@ async function handleLogin(req, res) {
       await prisma.admin.update({ where: { id: admin.id }, data: updateData });
 
       const remaining = config.security.maxLoginAttempts - newFailedCount;
-      if (remaining > 0) {
-        return res.render('login', { error: `كلمة المرور غير صحيحة. تبقى ${remaining} محاولات` });
-      } else {
-        return res.render('login', {
-          error: `تم قفل الحساب لمدة ${config.security.lockDurationMinutes} دقيقة`,
-        });
-      }
+      const errorMsg  = remaining > 0
+        ? `كلمة المرور غير صحيحة. تبقى ${remaining} محاولات`
+        : `تم قفل الحساب لمدة ${config.security.lockDurationMinutes} دقيقة`;
+
+      return res.render('login', {
+        error:     errorMsg,
+        csrfToken: res.locals.csrfToken || '',
+      });
     }
 
-    // Successful login
+    // ✅ تسجيل الدخول ناجح — تحديث بيانات الأدمن
     await prisma.admin.update({
       where: { id: admin.id },
-      data: { failedLogins: 0, lockedUntil: null, lastLoginAt: new Date() },
+      data: {
+        failedLogins: 0,
+        lockedUntil:  null,
+        lastLoginAt:  new Date(),
+      },
     });
 
+    // ✅ الإصلاح الأمني: تجديد Session ID لمنع Session Fixation
+    await new Promise((resolve, reject) => {
+      req.session.regenerate((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    // حفظ بيانات الأدمن في الجلسة الجديدة
     req.session.admin = {
       id:          admin.id,
       username:    admin.username,
       isSuperAdmin: admin.isSuperAdmin,
     };
 
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        adminId:    admin.id,
-        action:     'LOGIN',
-        ipAddress:  req.ip,
-        details:    { username: admin.username },
-      },
+    // حفظ الجلسة قبل الـ redirect
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    // تسجيل العملية في Audit Log
+    await logAudit({
+      adminId:   admin.id,
+      action:    'LOGIN',
+      ipAddress: req.ip,
+      details:   { username: admin.username },
     });
 
     const returnTo = req.session.returnTo || '/admin/dashboard';
@@ -101,8 +131,11 @@ async function handleLogin(req, res) {
     return res.redirect(returnTo);
 
   } catch (err) {
-    console.error('[AUTH ERROR]', err);
-    return res.render('login', { error: 'حدث خطأ. يرجى المحاولة لاحقاً' });
+    if (global.logger) global.logger.error('[AUTH] Login error: ' + err.message);
+    return res.render('login', {
+      error:     'حدث خطأ. يرجى المحاولة لاحقاً',
+      csrfToken: res.locals.csrfToken || '',
+    });
   }
 }
 
@@ -111,15 +144,19 @@ async function handleLogin(req, res) {
 // ─────────────────────────────────────────
 async function handleLogout(req, res) {
   if (req.session.admin) {
-    await prisma.auditLog.create({
-      data: {
-        adminId:   req.session.admin.id,
-        action:    'LOGOUT',
-        ipAddress: req.ip,
-      },
+    await logAudit({
+      adminId:   req.session.admin.id,
+      action:    'LOGOUT',
+      ipAddress: req.ip,
     }).catch(() => {});
   }
-  req.session.destroy(() => {
+
+  req.session.destroy((err) => {
+    if (err && global.logger) {
+      global.logger.error('[AUTH] Session destroy error: ' + err.message);
+    }
+    // مسح الـ cookie من المتصفح
+    res.clearCookie('sid');
     res.redirect('/admin/login');
   });
 }
@@ -130,10 +167,17 @@ async function handleLogout(req, res) {
 async function logAudit({ adminId, action, targetType, targetId, details, ipAddress }) {
   try {
     await prisma.auditLog.create({
-      data: { adminId, action, targetType, targetId, details, ipAddress },
+      data: {
+        adminId:    adminId || null,
+        action,
+        targetType: targetType || null,
+        targetId:   targetId   || null,
+        details:    details    || null,
+        ipAddress:  ipAddress  || null,
+      },
     });
   } catch (err) {
-    console.error('[AUDIT LOG ERROR]', err);
+    if (global.logger) global.logger.error('[AUDIT] ' + err.message);
   }
 }
 

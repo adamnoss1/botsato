@@ -94,14 +94,20 @@ function withdrawMethodsKeyboard(methods) {
 // ─────────────────────────────────────────
 // INLINE - PRODUCT GROUPS (categories)
 // ─────────────────────────────────────────
-function productGroupsKeyboard(groups) {
+function productGroupsKeyboard(groups, parentId) {
   const buttons = groups.map(g => [
     Markup.button.callback(g.name, `group_${g.id}`),
   ]);
-  buttons.push([Markup.button.callback('❌ إلغاء', 'cancel')]);
+
+  // زر الرجوع
+  if (parentId) {
+    buttons.push([Markup.button.callback('🔙 رجوع', `back_to_group_${parentId}`)]);
+  } else {
+    buttons.push([Markup.button.callback('❌ إلغاء', 'cancel')]);
+  }
+
   return Markup.inlineKeyboard(buttons);
 }
-
 // ─────────────────────────────────────────
 // INLINE - PRODUCTS LIST
 // ─────────────────────────────────────────

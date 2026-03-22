@@ -1,14 +1,17 @@
+<!-- admin/views/partials/topbar.ejs -->
 <header class="topbar">
   <div style="display:flex;align-items:center;gap:12px;">
-    <button onclick="document.getElementById('sidebar').classList.toggle('open')"
-            style="background:none;border:none;cursor:pointer;font-size:1.3rem;">
+    <button
+      onclick="document.getElementById('sidebar').classList.toggle('open')"
+      style="background:none;border:none;cursor:pointer;font-size:1.3rem;">
       <i class="bi bi-list"></i>
     </button>
     <h1 style="font-size:1rem;font-weight:600;"><%= title %></h1>
   </div>
   <div style="display:flex;align-items:center;gap:12px;">
     <span style="font-size:0.85rem;color:#6b7280;">
-      <i class="bi bi-person-circle"></i> <%= admin ? admin.username : '' %>
+      <i class="bi bi-person-circle"></i>
+      <%= admin ? admin.username : '' %>
     </span>
     <form action="/admin/logout" method="POST" style="margin:0;">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -18,12 +21,3 @@
     </form>
   </div>
 </header>
-<script>
-  setTimeout(() => {
-    document.querySelectorAll('.alert').forEach(el => {
-      el.style.transition = 'opacity 0.5s';
-      el.style.opacity = '0';
-      setTimeout(() => el.remove(), 500);
-    });
-  }, 4000);
-</script>
