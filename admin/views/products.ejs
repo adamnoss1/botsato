@@ -9,41 +9,120 @@ const pageBody = `
         <i class="bi bi-arrow-repeat"></i> مزامنة Satofill
       </button>
     </form>
+    <a href="/admin/categories" class="btn btn-outline">
+      <i class="bi bi-folder-tree"></i> إدارة التصنيفات
+    </a>
     <a href="/admin/products/create" class="btn btn-primary">
       <i class="bi bi-plus-lg"></i> إضافة منتج
     </a>
   </div>
 </div>
 
+<!-- فلترة وبحث -->
 <div class="card" style="margin-bottom:16px;">
   <div class="card-body">
-    <form method="GET" style="display:flex;gap:10px;">
-      <input type="text" name="search" value="${search}" class="form-control"
-             placeholder="بحث بالاسم أو Satofill ID" style="max-width:300px;">
-      <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i> بحث</button>
+    <form method="GET" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+      <div class="form-group" style="margin:0;flex:1;min-width:200px;">
+        <label class="form-label" style="font-size:0.8rem;">بحث</label>
+        <input type="text" name="search" value="${search}" class="form-control"
+               placeholder="اسم المنتج أو Satofill ID">
+      </div>
+      <div class="form-group" style="margin:0;min-width:200px;">
+        <label class="form-label" style="font-size:0.8rem;">التصنيف</label>
+        <select name="groupId" class="form-control">
+          <option value="">كل التصنيفات</option>
+          ${groups.map(g => `
+            <option value="${g.id}" ${currentGroupId === g.id ? 'selected' : ''}>
+              ${g.parent ? '└─ ' : ''}${g.name}
+            </option>
+          `).join('')}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary" style="white-space:nowrap;">
+        <i class="bi bi-search"></i> بحث
+      </button>
+      <a href="/admin/products" class="btn btn-outline" style="white-space:nowrap;">
+        <i class="bi bi-x"></i> مسح
+      </a>
     </form>
   </div>
 </div>
 
+<!-- Bulk Actions -->
+<div class="card" style="margin-bottom:16px;background:#f0f9ff;border-color:#bae6fd;" id="bulk-actions" style="display:none;">
+  <div class="card-body">
+    <form action="/admin/products/bulk-category" method="POST"
+          style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <input type="hidden" name="_csrf" value="${csrfToken}">
+      <div id="selected-ids-container"></div>
+      <span style="font-weight:600;color:#0369a1;">
+        📦 نقل <span id="selected-count">0</span> منتج إلى تصنيف:
+      </span>
+      <select name="groupId" class="form-control" style="min-width:200px;" required>
+        <option value="">اختر التصنيف...</option>
+        ${groups.map(g => `
+          <option value="${g.id}">
+            ${g.parent ? '└─ ' : ''}${g.name}
+          </option>
+        `).join('')}
+      </select>
+      <button type="submit" class="btn btn-primary"
+              onclick="return confirm('نقل المنتجات المحددة؟')">
+        <i class="bi bi-folder-symlink"></i> نقل
+      </button>
+      <button type="button" class="btn btn-outline" onclick="clearSelection()">
+        إلغاء التحديد
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- جدول المنتجات -->
 <div class="card">
+  <div class="card-body" style="padding:10px 16px;border-bottom:1px solid #e5e7eb;
+       display:flex;justify-content:space-between;align-items:center;">
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;">
+      <input type="checkbox" id="select-all" style="width:16px;height:16px;">
+      تحديد الكل
+    </label>
+    <span style="font-size:0.8rem;color:#6b7280;">${total} منتج</span>
+  </div>
   <div class="table-responsive">
     <table>
       <thead>
         <tr>
-          <th>#</th><th>الاسم</th><th>الفئة</th><th>Satofill ID</th>
-          <th>السعر $</th><th>النوع</th><th>الحالة</th><th>إجراء</th>
+          <th style="width:40px;"></th>
+          <th>#</th>
+          <th>الاسم</th>
+          <th>الفئة</th>
+          <th>Satofill ID</th>
+          <th>السعر $</th>
+          <th>النوع</th>
+          <th>الحالة</th>
+          <th>إجراء</th>
         </tr>
       </thead>
       <tbody>
         ${products.map(p => `
         <tr>
+          <td>
+            <input type="checkbox" class="product-checkbox"
+                   value="${p.id}" style="width:16px;height:16px;cursor:pointer;">
+          </td>
           <td>${p.id}</td>
-          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
             ${p.name}
           </td>
-          <td>${p.group?.name || '—'}</td>
+          <td>
+            <div style="display:flex;flex-direction:column;gap:2px;">
+              ${p.group?.parent ? `
+                <span style="font-size:0.72rem;color:#9ca3af;">${p.group.parent.name}</span>
+              ` : ''}
+              <span class="badge badge-info">${p.group?.name || '—'}</span>
+            </div>
+          </td>
           <td><code style="font-size:0.75rem;">${p.satofillId || '—'}</code></td>
-          <td>${parseFloat(p.priceUsd).toFixed(6)}</td>
+          <td>${parseFloat(p.priceUsd).toFixed(4)}</td>
           <td>
             <span class="badge ${p.isManual ? 'badge-warning' : 'badge-info'}">
               ${p.isManual ? 'يدوي' : 'تلقائي'}
@@ -70,15 +149,52 @@ const pageBody = `
       </tbody>
     </table>
   </div>
+
   ${pages > 1 ? `
   <div class="card-body">
     <div class="pagination">
-      ${page > 1 ? `<a href="?page=${page-1}&search=${search}">◀️</a>` : ''}
+      ${page > 1 ? `<a href="?page=${page-1}&search=${search}&groupId=${currentGroupId||''}">◀️</a>` : ''}
       <span class="current">${page} / ${pages}</span>
-      ${page < pages ? `<a href="?page=${page+1}&search=${search}">▶️</a>` : ''}
+      ${page < pages ? `<a href="?page=${page+1}&search=${search}&groupId=${currentGroupId||''}">▶️</a>` : ''}
     </div>
   </div>` : ''}
 </div>
+
+<script>
+// ── Bulk Selection ──
+const checkboxes   = document.querySelectorAll('.product-checkbox');
+const selectAll    = document.getElementById('select-all');
+const bulkActions  = document.getElementById('bulk-actions');
+const selectedCount = document.getElementById('selected-count');
+const container    = document.getElementById('selected-ids-container');
+
+function updateBulkBar() {
+  const checked = document.querySelectorAll('.product-checkbox:checked');
+  selectedCount.textContent = checked.length;
+  container.innerHTML = '';
+  checked.forEach(cb => {
+    const inp = document.createElement('input');
+    inp.type  = 'hidden';
+    inp.name  = 'productIds[]';
+    inp.value = cb.value;
+    container.appendChild(inp);
+  });
+  bulkActions.style.display = checked.length > 0 ? 'block' : 'none';
+}
+
+function clearSelection() {
+  checkboxes.forEach(cb => cb.checked = false);
+  selectAll.checked = false;
+  updateBulkBar();
+}
+
+selectAll.addEventListener('change', function() {
+  checkboxes.forEach(cb => cb.checked = this.checked);
+  updateBulkBar();
+});
+
+checkboxes.forEach(cb => cb.addEventListener('change', updateBulkBar));
+</script>
 `;
 %>
 <%- include('layout', { body: pageBody }) %>

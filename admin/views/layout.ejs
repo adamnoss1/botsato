@@ -10,11 +10,34 @@
 <body>
 <div class="layout">
 
-  <!-- SIDEBAR -->
+  <!-- ═══════════════════════════════════
+       SIDEBAR
+  ═══════════════════════════════════ -->
   <aside class="sidebar" id="sidebar">
+
     <div class="sidebar-brand">
       <i class="bi bi-robot"></i> لوحة التحكم
+
+      <!-- زر الإغلاق — موبايل فقط -->
+      <button
+        id="btn-sidebar-close"
+        style="
+          display: none;
+          position: absolute;
+          top: 16px;
+          left: 16px;
+          background: none;
+          border: none;
+          color: #9ca3af;
+          font-size: 1.3rem;
+          cursor: pointer;
+          line-height: 1;
+        "
+        aria-label="إغلاق القائمة">
+        <i class="bi bi-x-lg"></i>
+      </button>
     </div>
+
     <nav class="sidebar-nav">
       <a href="/admin/dashboard"
          class="<%= title.includes('لوحة') ? 'active' : '' %>">
@@ -43,6 +66,10 @@
       <a href="/admin/products"
          class="<%= title.includes('منتج') ? 'active' : '' %>">
         <i class="bi bi-box-seam"></i> المنتجات
+      </a>
+      <a href="/admin/categories"
+         class="<%= title.includes('تصنيف') ? 'active' : '' %>">
+        <i class="bi bi-folder-tree"></i> التصنيفات
       </a>
       <a href="/admin/deposit-methods"
          class="<%= title.includes('طرق الإيداع') ? 'active' : '' %>">
@@ -79,19 +106,33 @@
     </nav>
   </aside>
 
-  <!-- MAIN CONTENT -->
+  <!-- ═══════════════════════════════════
+       MAIN CONTENT
+  ═══════════════════════════════════ -->
   <div class="main-content">
 
     <!-- TOPBAR -->
     <header class="topbar">
       <div style="display:flex;align-items:center;gap:12px;">
+        <!-- زر فتح الـ sidebar -->
         <button
-          onclick="document.getElementById('sidebar').classList.toggle('open')"
-          style="background:none;border:none;cursor:pointer;font-size:1.3rem;">
+          id="btn-sidebar-open"
+          style="
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1.4rem;
+            padding: 4px 8px;
+            border-radius: 6px;
+            color: #374151;
+            line-height: 1;
+          "
+          aria-label="فتح القائمة">
           <i class="bi bi-list"></i>
         </button>
         <h1 style="font-size:1rem;font-weight:600;"><%= title %></h1>
       </div>
+
       <div style="display:flex;align-items:center;gap:12px;">
         <span style="font-size:0.85rem;color:#6b7280;">
           <i class="bi bi-person-circle"></i>
@@ -109,14 +150,13 @@
     <!-- PAGE CONTENT -->
     <main class="page-content">
 
-      <!-- ALERTS -->
       <% if (success) { %>
-        <div class="alert alert-success" id="flash-success">
+        <div class="alert alert-success">
           <i class="bi bi-check-circle"></i> <%= success %>
         </div>
       <% } %>
       <% if (error) { %>
-        <div class="alert alert-danger" id="flash-error">
+        <div class="alert alert-danger">
           <i class="bi bi-exclamation-circle"></i> <%= error %>
         </div>
       <% } %>
@@ -127,8 +167,11 @@
   </div>
 </div>
 
-<!-- ✅ Script في مكان واحد فقط — تم حذفه من partials/topbar.ejs -->
+<!-- ═══════════════════════════════════
+     SCRIPTS
+═══════════════════════════════════ -->
 <script>
+  // ── Alerts auto-hide ──
   setTimeout(function () {
     document.querySelectorAll('.alert').forEach(function (el) {
       el.style.transition = 'opacity 0.5s';
@@ -136,6 +179,50 @@
       setTimeout(function () { el.remove(); }, 500);
     });
   }, 4000);
+
+  // ── Sidebar toggle ──
+  (function () {
+    var sidebar  = document.getElementById('sidebar');
+    var btnOpen  = document.getElementById('btn-sidebar-open');
+    var btnClose = document.getElementById('btn-sidebar-close');
+
+    // أنشئ overlay ديناميكياً
+    var overlay = document.createElement('div');
+    overlay.className = 'sidebar-overlay';
+    document.body.appendChild(overlay);
+
+    function openSidebar() {
+      sidebar.classList.add('open');
+      overlay.classList.add('active');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeSidebar() {
+      sidebar.classList.remove('open');
+      overlay.classList.remove('active');
+      document.body.style.overflow = '';
+    }
+
+    if (btnOpen)  btnOpen.addEventListener('click',  openSidebar);
+    if (btnClose) btnClose.addEventListener('click', closeSidebar);
+
+    // الضغط على الـ overlay يغلق الـ sidebar
+    overlay.addEventListener('click', closeSidebar);
+
+    // إغلاق عند الضغط على أي رابط في الموبايل
+    if (sidebar) {
+      sidebar.querySelectorAll('a').forEach(function (link) {
+        link.addEventListener('click', function () {
+          if (window.innerWidth <= 768) closeSidebar();
+        });
+      });
+    }
+
+    // إغلاق عند تغيير حجم الشاشة للـ desktop
+    window.addEventListener('resize', function () {
+      if (window.innerWidth > 768) closeSidebar();
+    });
+  })();
 </script>
 
 </body>

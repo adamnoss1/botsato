@@ -1,11 +1,12 @@
 // middleware/auth.js
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const config = require('../config/settings');
 
 // ─────────────────────────────────────────
-// AUTH MIDDLEWARE — التحقق من تسجيل الدخول
+// AUTH MIDDLEWARE
 // ─────────────────────────────────────────
 function authMiddleware(req, res, next) {
   if (req.session && req.session.admin) {
@@ -41,7 +42,6 @@ async function handleLogin(req, res) {
   try {
     const admin = await prisma.admin.findUnique({ where: { username } });
 
-    // المستخدم غير موجود أو غير نشط
     if (!admin || !admin.isActive) {
       return res.render('login', {
         error:     'بيانات الدخول غير صحيحة',
@@ -85,7 +85,7 @@ async function handleLogin(req, res) {
       });
     }
 
-    // ✅ تسجيل الدخول ناجح — تحديث بيانات الأدمن
+    // ✅ تسجيل دخول ناجح
     await prisma.admin.update({
       where: { id: admin.id },
       data: {
@@ -95,7 +95,7 @@ async function handleLogin(req, res) {
       },
     });
 
-    // ✅ الإصلاح الأمني: تجديد Session ID لمنع Session Fixation
+    // ✅ تجديد Session ID لمنع Session Fixation
     await new Promise((resolve, reject) => {
       req.session.regenerate((err) => {
         if (err) reject(err);
@@ -103,10 +103,13 @@ async function handleLogin(req, res) {
       });
     });
 
-    // حفظ بيانات الأدمن في الجلسة الجديدة
+    // ✅ توليد CSRF token جديد بعد regenerate
+    req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+
+    // حفظ بيانات الأدمن
     req.session.admin = {
-      id:          admin.id,
-      username:    admin.username,
+      id:           admin.id,
+      username:     admin.username,
       isSuperAdmin: admin.isSuperAdmin,
     };
 
@@ -118,7 +121,7 @@ async function handleLogin(req, res) {
       });
     });
 
-    // تسجيل العملية في Audit Log
+    // تسجيل في Audit Log
     await logAudit({
       adminId:   admin.id,
       action:    'LOGIN',
@@ -155,7 +158,6 @@ async function handleLogout(req, res) {
     if (err && global.logger) {
       global.logger.error('[AUTH] Session destroy error: ' + err.message);
     }
-    // مسح الـ cookie من المتصفح
     res.clearCookie('sid');
     res.redirect('/admin/login');
   });
@@ -168,7 +170,7 @@ async function logAudit({ adminId, action, targetType, targetId, details, ipAddr
   try {
     await prisma.auditLog.create({
       data: {
-        adminId:    adminId || null,
+        adminId:    adminId    || null,
         action,
         targetType: targetType || null,
         targetId:   targetId   || null,

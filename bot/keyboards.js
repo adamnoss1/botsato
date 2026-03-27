@@ -1,46 +1,39 @@
+// bot/keyboards.js
 const { Markup } = require('telegraf');
 const { getVipBadge, getVipLabel } = require('../services/vipService');
 
 // ─────────────────────────────────────────
-// MAIN MENU
+// MAIN MENU — صفين
 // ─────────────────────────────────────────
 function mainMenu(user) {
-  const badge = getVipBadge(user.vipLevel);
   return Markup.keyboard([
-    ['📊 معاملاتي', '💰 محفظتي'],
-    ['⚡️ شحن تلقائي', '⚙️ شحن يدوي'],
-    ['🎧 الدعم الفني', '📢 الإعلانات'],
-    ['🔧 أنظمة البوت', '👥 الإحالة'],
+    ['⚡️ شحن تلقائي',  '⚙️ شحن يدوي'   ],
+    ['💰 محفظتي',      '📊 معاملاتي'    ],
+    ['👥 الإحالة',     '🎧 الدعم الفني' ],
+    ['📢 الإعلانات',   '🔧 أنظمة البوت' ],
   ]).resize();
 }
 
 // ─────────────────────────────────────────
-// WALLET MENU
+// WALLET MENU — صفين
 // ─────────────────────────────────────────
 function walletMenu() {
   return Markup.keyboard([
-    ['➕ إيداع', '➖ سحب'],
-    ['↔️ تحويل رصيد', '💳 رصيدي'],
+    ['➕ إيداع',        '➖ سحب'         ],
+    ['↔️ تحويل رصيد',  '💳 رصيدي'       ],
     ['🔙 القائمة الرئيسية'],
   ]).resize();
 }
 
 // ─────────────────────────────────────────
-// TRANSACTIONS MENU
+// TRANSACTIONS MENU — صفين
 // ─────────────────────────────────────────
 function transactionsMenu() {
   return Markup.keyboard([
-    ['📥 سجل الإيداعات', '📤 سجل السحوبات'],
-    ['📦 سجل الطلبات', '⏳ الطلبات النشطة'],
+    ['📥 سجل الإيداعات',  '📤 سجل السحوبات' ],
+    ['📦 سجل الطلبات',    '⏳ الطلبات النشطة'],
     ['🔙 القائمة الرئيسية'],
   ]).resize();
-}
-
-// ─────────────────────────────────────────
-// BACK BUTTON
-// ─────────────────────────────────────────
-function backButton(label = '🔙 رجوع') {
-  return Markup.keyboard([[label]]).resize();
 }
 
 // ─────────────────────────────────────────
@@ -60,88 +53,101 @@ function confirmCancel() {
 }
 
 // ─────────────────────────────────────────
-// INLINE - CHANNEL VERIFICATION
+// CHANNEL VERIFY
 // ─────────────────────────────────────────
 function channelVerifyKeyboard(channelUsername) {
   return Markup.inlineKeyboard([
-    [Markup.button.url('📢 انضم للقناة', `https://t.me/${channelUsername}`)],
-    [Markup.button.callback('✅ تحقق من الاشتراك', 'verify_subscription')],
+    [Markup.button.url('📢 انضم للقناة الآن', `https://t.me/${channelUsername}`)],
+    [Markup.button.callback('✅ تحققت من الاشتراك', 'verify_subscription')],
   ]);
 }
 
 // ─────────────────────────────────────────
-// INLINE - DEPOSIT METHODS
+// DEPOSIT METHODS
 // ─────────────────────────────────────────
 function depositMethodsKeyboard(methods) {
   const buttons = methods.map(m => [
-    Markup.button.callback(`${m.name} (1$ = ${m.exchangeRate})`, `deposit_method_${m.id}`),
+    Markup.button.callback(
+      `💳 ${m.name}  •  1$ = ${m.exchangeRate}`,
+      `deposit_method_${m.id}`
+    ),
   ]);
   buttons.push([Markup.button.callback('❌ إلغاء', 'cancel')]);
   return Markup.inlineKeyboard(buttons);
 }
 
 // ─────────────────────────────────────────
-// INLINE - WITHDRAW METHODS
+// WITHDRAW METHODS
 // ─────────────────────────────────────────
 function withdrawMethodsKeyboard(methods) {
-  const buttons = methods.map(m => [
-    Markup.button.callback(`${m.name}`, `withdraw_method_${m.id}`),
-  ]);
+  const buttons = methods.map(m => {
+    const rate    = parseFloat(m.exchangeRate) || 1;
+    const rateStr = rate !== 1 ? `  •  1$ = ${rate}` : '';
+    const feeStr  = m.feeType === 'percentage'
+      ? `رسوم ${(parseFloat(m.feeValue) * 100).toFixed(0)}%`
+      : `رسوم ثابتة ${m.feeValue}$`;
+    return [Markup.button.callback(
+      `💸 ${m.name}${rateStr}  [${feeStr}]`,
+      `withdraw_method_${m.id}`
+    )];
+  });
   buttons.push([Markup.button.callback('❌ إلغاء', 'cancel')]);
   return Markup.inlineKeyboard(buttons);
 }
 
 // ─────────────────────────────────────────
-// INLINE - PRODUCT GROUPS (categories)
+// PRODUCT GROUPS — صفين
 // ─────────────────────────────────────────
 function productGroupsKeyboard(groups, parentId) {
-  const buttons = groups.map(g => [
-    Markup.button.callback(g.name, `group_${g.id}`),
-  ]);
+  const icons   = ['🎮','📱','💎','🎯','🔥','⭐','🎁','🏆','💻','🎪','🃏','🎲'];
+  const buttons = [];
 
-  // زر الرجوع
+  // ترتيب في صفين
+  for (let i = 0; i < groups.length; i += 2) {
+    const row = [
+      Markup.button.callback(
+        `${icons[i % icons.length]} ${groups[i].name}`,
+        `group_${groups[i].id}`
+      ),
+    ];
+    if (groups[i + 1]) {
+      row.push(Markup.button.callback(
+        `${icons[(i + 1) % icons.length]} ${groups[i + 1].name}`,
+        `group_${groups[i + 1].id}`
+      ));
+    }
+    buttons.push(row);
+  }
+
   if (parentId) {
-    buttons.push([Markup.button.callback('🔙 رجوع', `back_to_group_${parentId}`)]);
+    buttons.push([Markup.button.callback('🔙 رجوع للتصنيف السابق', `back_to_group_${parentId}`)]);
   } else {
     buttons.push([Markup.button.callback('❌ إلغاء', 'cancel')]);
   }
 
   return Markup.inlineKeyboard(buttons);
 }
+
 // ─────────────────────────────────────────
-// INLINE - PRODUCTS LIST
+// PRODUCTS LIST — صف واحد لكل منتج
 // ─────────────────────────────────────────
-function productsKeyboard(products, page = 1, totalPages = 1) {
+function productsKeyboard(products, page, totalPages) {
   const buttons = products.map(p => [
-    Markup.button.callback(
-      `${p.name} - ${p.priceUsd}$`,
-      `product_${p.id}`
-    ),
+    Markup.button.callback(`⚡ ${p.name}`, `product_${p.id}`),
   ]);
 
-  const nav = [];
-  if (page > 1)          nav.push(Markup.button.callback('◀️ السابق', `products_page_${page - 1}`));
-  if (page < totalPages) nav.push(Markup.button.callback('التالي ▶️', `products_page_${page + 1}`));
-  if (nav.length > 0) buttons.push(nav);
+  const navRow = [];
+  if (page > 1)          navRow.push(Markup.button.callback('◀️ السابق', `products_page_${page - 1}`));
+  navRow.push(Markup.button.callback(`📄 ${page}/${totalPages}`, 'noop'));
+  if (page < totalPages) navRow.push(Markup.button.callback('التالي ▶️', `products_page_${page + 1}`));
+  if (navRow.length > 1) buttons.push(navRow);
 
-  buttons.push([Markup.button.callback('🔙 رجوع', 'back_to_groups')]);
+  buttons.push([Markup.button.callback('🔙 رجوع للتصنيفات', 'back_to_groups')]);
   return Markup.inlineKeyboard(buttons);
 }
 
 // ─────────────────────────────────────────
-// INLINE - ORDER CONFIRM
-// ─────────────────────────────────────────
-function orderConfirmKeyboard(orderId) {
-  return Markup.inlineKeyboard([
-    [
-      Markup.button.callback('✅ تأكيد الطلب', `confirm_order_${orderId}`),
-      Markup.button.callback('❌ إلغاء', 'cancel'),
-    ],
-  ]);
-}
-
-// ─────────────────────────────────────────
-// INLINE - PAGINATION
+// PAGINATION
 // ─────────────────────────────────────────
 function paginationKeyboard(prefix, page, totalPages) {
   const buttons = [];
@@ -155,7 +161,6 @@ module.exports = {
   mainMenu,
   walletMenu,
   transactionsMenu,
-  backButton,
   cancelButton,
   confirmCancel,
   channelVerifyKeyboard,
@@ -163,6 +168,5 @@ module.exports = {
   withdrawMethodsKeyboard,
   productGroupsKeyboard,
   productsKeyboard,
-  orderConfirmKeyboard,
   paginationKeyboard,
 };

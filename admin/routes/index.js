@@ -23,7 +23,7 @@ const auditCtrl       = require('../controllers/auditController');
 const backupCtrl      = require('../controllers/backupController');
 
 // ─────────────────────────────────────────
-// ROOT — /admin → /admin/dashboard
+// ROOT — /admin → redirect
 // ─────────────────────────────────────────
 router.get('/', (req, res) => {
   if (req.session?.admin) return res.redirect('/admin/dashboard');
@@ -36,7 +36,7 @@ router.get('/', (req, res) => {
 router.get('/login', (req, res) => {
   if (req.session?.admin) return res.redirect('/admin/dashboard');
   res.render('login', {
-    error:     res.locals.error   || null,
+    error:     res.locals.error    || null,
     csrfToken: res.locals.csrfToken || '',
   });
 });
@@ -77,6 +77,7 @@ router.post('/withdrawals/:id/reject',   authMiddleware, withdrawalsCtrl.reject)
 
 // ─────────────────────────────────────────
 // ORDERS
+// ⚠️ المسار الثابت /manual قبل الديناميكي /:id
 // ─────────────────────────────────────────
 router.get('/orders',                    authMiddleware, ordersCtrl.index);
 router.get('/orders/manual',             authMiddleware, ordersCtrl.manualIndex);
@@ -87,13 +88,23 @@ router.post('/orders/manual/:id/status', authMiddleware, ordersCtrl.updateManual
 // PRODUCTS
 // ⚠️ المسارات الثابتة قبل الديناميكية (:id)
 // ─────────────────────────────────────────
-router.get('/products',           authMiddleware, productsCtrl.index);
-router.get('/products/create',    authMiddleware, productsCtrl.createForm);
-router.post('/products',          authMiddleware, productsCtrl.create);
-router.post('/products/sync',     authMiddleware, productsCtrl.syncSatofill);
-router.get('/products/:id/edit',  authMiddleware, productsCtrl.editForm);
-router.post('/products/:id',      authMiddleware, productsCtrl.update);
+router.get('/products',             authMiddleware, productsCtrl.index);
+router.get('/products/create',      authMiddleware, productsCtrl.createForm);
+router.post('/products',            authMiddleware, productsCtrl.create);
+router.post('/products/sync',       authMiddleware, productsCtrl.syncSatofill);
+router.get('/products/:id/edit',    authMiddleware, productsCtrl.editForm);
+router.post('/products/:id',        authMiddleware, productsCtrl.update);
+router.post('/products/bulk-category', authMiddleware, productsCtrl.bulkAssignCategory);
 router.post('/products/:id/delete', authMiddleware, superAdminOnly, productsCtrl.delete);
+
+
+// ─────────────────────────────────────────
+// CATEGORIES
+// ─────────────────────────────────────────
+router.get('/categories',                authMiddleware, productsCtrl.categoriesIndex);
+router.post('/categories/:id/parent',    authMiddleware, productsCtrl.updateCategoryParent);
+router.post('/categories/create', authMiddleware, productsCtrl.createCategory);
+router.post('/categories/:id/delete',    authMiddleware, superAdminOnly, productsCtrl.deleteCategory);
 
 // ─────────────────────────────────────────
 // DEPOSIT METHODS

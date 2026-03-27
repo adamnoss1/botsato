@@ -6,37 +6,65 @@ const pageBody = `
     <i class="bi bi-arrow-right"></i> رجوع
   </a>
 </div>
-<div class="card" style="max-width:600px;">
+<div class="card" style="max-width:640px;">
   <div class="card-header">${isEdit ? '✏️ تعديل طريقة سحب' : '➕ إضافة طريقة سحب'}</div>
   <div class="card-body">
     <form action="${isEdit ? '/admin/withdraw-methods/'+method.id : '/admin/withdraw-methods'}" method="POST">
       <input type="hidden" name="_csrf" value="${csrfToken}">
-      <div class="form-group">
-        <label class="form-label">الاسم *</label>
-        <input type="text" name="name" class="form-control" required
-               value="${isEdit ? method.name : ''}">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="form-group">
+          <label class="form-label">الاسم *</label>
+          <input type="text" name="name" class="form-control" required
+                 value="${isEdit ? method.name : ''}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">الاسم بالعربي</label>
+          <input type="text" name="nameAr" class="form-control"
+                 value="${isEdit && method.nameAr ? method.nameAr : ''}">
+        </div>
       </div>
+
+      <!-- سعر الصرف -->
       <div class="form-group">
-        <label class="form-label">الاسم بالعربي</label>
-        <input type="text" name="nameAr" class="form-control"
-               value="${isEdit && method.nameAr ? method.nameAr : ''}">
+        <label class="form-label">
+          💱 سعر الصرف (1$ = ؟ بالعملة المحلية)
+          <small style="color:#6b7280;font-weight:400;">
+            — إذا كان السحب بالدولار مباشرة اتركه 1
+          </small>
+        </label>
+        <input type="number" step="0.000001" name="exchangeRate" class="form-control" required
+               value="${isEdit ? method.exchangeRate : '1'}"
+               placeholder="مثال: 1 للدولار، 3.75 للريال">
+        <small style="color:#6b7280;">
+          مثال: سحب بالليرة السورية → 1$ = 14000 → أدخل 14000
+        </small>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
         <div class="form-group">
           <label class="form-label">الحد الأدنى ($) *</label>
           <input type="number" step="0.01" name="minAmount" class="form-control" required
-                 value="${isEdit ? method.minAmount : '10'}">
+                 value="${isEdit ? method.minAmount : '5'}">
         </div>
         <div class="form-group">
           <label class="form-label">الحد الأقصى ($) *</label>
           <input type="number" step="0.01" name="maxAmount" class="form-control" required
                  value="${isEdit ? method.maxAmount : '5000'}">
         </div>
+      </div>
+
+      <!-- الرسوم -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
         <div class="form-group">
           <label class="form-label">نوع الرسوم *</label>
           <select name="feeType" class="form-control">
-            <option value="percentage" ${isEdit && method.feeType==='percentage'?'selected':''}>نسبة مئوية</option>
-            <option value="fixed"      ${isEdit && method.feeType==='fixed'     ?'selected':''}>ثابت</option>
+            <option value="percentage" ${!isEdit || method.feeType==='percentage' ? 'selected' : ''}>
+              نسبة مئوية (%)
+            </option>
+            <option value="fixed" ${isEdit && method.feeType==='fixed' ? 'selected' : ''}>
+              ثابت ($)
+            </option>
           </select>
         </div>
         <div class="form-group">
@@ -46,17 +74,63 @@ const pageBody = `
           <small style="color:#6b7280;">نسبة: 0.02 = 2% | ثابت: بالدولار</small>
         </div>
       </div>
+
       <div class="form-group">
         <label class="form-label">الوصف</label>
         <input type="text" name="description" class="form-control"
                value="${isEdit && method.description ? method.description : ''}">
       </div>
+
+      <div class="form-group">
+        <label class="form-label">تعليمات السحب</label>
+        <textarea name="instructions" class="form-control" rows="3"
+                  placeholder="رقم الحساب، معلومات إضافية...">${isEdit && method.instructions ? method.instructions : ''}</textarea>
+      </div>
+
+      <!-- معاينة حية -->
+      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:14px;margin-bottom:16px;">
+        <strong style="font-size:0.85rem;color:#0369a1;">🧮 معاينة الحساب:</strong>
+        <div id="preview" style="font-size:0.85rem;color:#0369a1;margin-top:8px;">
+          أدخل القيم لرؤية المعاينة
+        </div>
+      </div>
+
       <button type="submit" class="btn btn-primary">
         <i class="bi bi-floppy"></i> ${isEdit ? 'حفظ' : 'إضافة'}
       </button>
     </form>
   </div>
 </div>
+
+<script>
+function updatePreview() {
+  const rate     = parseFloat(document.querySelector('[name=exchangeRate]').value) || 1;
+  const minUsd   = parseFloat(document.querySelector('[name=minAmount]').value)    || 0;
+  const maxUsd   = parseFloat(document.querySelector('[name=maxAmount]').value)    || 0;
+  const feeType  = document.querySelector('[name=feeType]').value;
+  const feeValue = parseFloat(document.querySelector('[name=feeValue]').value)     || 0;
+
+  // مثال بمبلغ 10$
+  const example   = 10;
+  const fee       = feeType === 'percentage' ? example * feeValue : feeValue;
+  const net       = example - fee;
+  const netLocal  = net * rate;
+  const minLocal  = minUsd * rate;
+  const maxLocal  = maxUsd * rate;
+
+  document.getElementById('preview').innerHTML =
+    '💵 مثال: سحب <strong>10$</strong><br>' +
+    '&nbsp;&nbsp;الرسوم: <strong>' + fee.toFixed(4) + '$</strong><br>' +
+    '&nbsp;&nbsp;الصافي: <strong>' + net.toFixed(4) + '$</strong>' +
+    (rate !== 1 ? ' = <strong>' + netLocal.toFixed(2) + '</strong> بالعملة المحلية' : '') + '<br>' +
+    (rate !== 1 ? '&nbsp;&nbsp;الحدود: ' + minLocal.toFixed(2) + ' — ' + maxLocal.toFixed(2) + ' بالعملة المحلية' : '');
+}
+
+document.querySelectorAll('input, select').forEach(el => {
+  el.addEventListener('input', updatePreview);
+});
+updatePreview();
+</script>
 `;
 %>
 <%- include('layout', { body: pageBody }) %>

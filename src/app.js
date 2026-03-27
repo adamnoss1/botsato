@@ -6,7 +6,7 @@ const session        = require('express-session');
 const pgSession      = require('connect-pg-simple')(session);
 const helmet         = require('helmet');
 const methodOverride = require('method-override');
-const cookieParser   = require('cookie-parser');
+const crypto         = require('crypto');
 const path           = require('path');
 const config         = require('../config/settings');
 const { botRateLimit } = require('../middleware/rateLimit');
@@ -15,7 +15,7 @@ const adminRoutes    = require('../admin/routes/index');
 const app = express();
 
 // ─────────────────────────────────────────
-// TRUST PROXY (مهم لـ Railway)
+// TRUST PROXY
 // ─────────────────────────────────────────
 app.set('trust proxy', 1);
 
@@ -62,11 +62,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(methodOverride('_method'));
 
 // ─────────────────────────────────────────
-// COOKIE PARSER — مطلوب لـ csrf-csrf
-// ─────────────────────────────────────────
-app.use(cookieParser());
-
-// ─────────────────────────────────────────
 // STATIC FILES
 // ─────────────────────────────────────────
 app.use('/public', express.static(path.join(__dirname, '../public'), {
@@ -89,7 +84,8 @@ app.use(session({
   saveUninitialized: false,
   name:              'sid',
   cookie: {
-    secure:   config.app.nodeEnv === 'production',
+    // ✅ secure: false حتى مع Railway — Railway يتعامل مع HTTPS خارجياً
+    secure:   false,
     httpOnly: true,
     maxAge:   config.security.sessionMaxAge,
     sameSite: 'lax',
@@ -97,40 +93,51 @@ app.use(session({
 }));
 
 // ─────────────────────────────────────────
-// CSRF PROTECTION — csrf-csrf
+// CSRF — Session-based (أبسط وأكثر موثوقية)
 // ─────────────────────────────────────────
-const { doubleCsrf } = require('csrf-csrf');
 
-const { generateToken, doubleCsrfProtection } = doubleCsrf({
-  getSecret: () => config.app.sessionSecret,
-  // ✅ اسم بدون __Host- لتجنب مشاكل HTTPS/proxy
-  cookieName: 'x-csrf-token',
-  cookieOptions: {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure:   config.app.nodeEnv === 'production',
-    path:     '/',
-  },
-  size:           64,
-  ignoredMethods: ['GET', 'HEAD', 'OPTIONS'],
-});
+// توليد token وتخزينه في الـ session
+function generateCsrfToken(req) {
+  if (!req.session.csrfToken) {
+    req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+  }
+  return req.session.csrfToken;
+}
 
-// تطبيق CSRF على admin فقط
-app.use('/admin', doubleCsrfProtection);
+// middleware للتحقق من الـ token في POST requests
+function csrfProtection(req, res, next) {
+  // تجاهل GET, HEAD, OPTIONS
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    return next();
+  }
+
+  const sessionToken = req.session.csrfToken;
+  const bodyToken    = req.body._csrf || req.headers['x-csrf-token'];
+
+  if (!sessionToken || !bodyToken || sessionToken !== bodyToken) {
+    if (global.logger) {
+      global.logger.warn('[CSRF] Invalid token from ' + req.ip + ' — path: ' + req.path);
+    }
+    req.session.error = 'انتهت صلاحية الجلسة. يرجى المحاولة مجدداً.';
+    return res.redirect('/admin/login');
+  }
+
+  // تجديد الـ token بعد كل POST ناجح
+  req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+  next();
+}
+
+// تطبيق CSRF على admin
+app.use('/admin', csrfProtection);
 
 // ─────────────────────────────────────────
 // GLOBAL LOCALS FOR VIEWS
 // ─────────────────────────────────────────
 app.use((req, res, next) => {
-  res.locals.admin   = req.session.admin   || null;
-  res.locals.success = req.session.success || null;
-  res.locals.error   = req.session.error   || null;
-
-  try {
-    res.locals.csrfToken = generateToken(req, res);
-  } catch (_) {
-    res.locals.csrfToken = '';
-  }
+  res.locals.admin     = req.session.admin   || null;
+  res.locals.success   = req.session.success || null;
+  res.locals.error     = req.session.error   || null;
+  res.locals.csrfToken = generateCsrfToken(req);
 
   delete req.session.success;
   delete req.session.error;
@@ -171,17 +178,6 @@ app.use((req, res) => {
 // GLOBAL ERROR HANDLER
 // ─────────────────────────────────────────
 app.use((err, req, res, next) => {
-  // CSRF Error
-  if (
-    err.code === 'EBADCSRFTOKEN' ||
-    err.message === 'invalid csrf token' ||
-    err.message === 'ForbiddenError'
-  ) {
-    if (global.logger) global.logger.warn('[CSRF] Invalid token from ' + req.ip);
-    req.session.error = 'انتهت صلاحية الجلسة. يرجى المحاولة مجدداً.';
-    return res.redirect('/admin/login');
-  }
-
   if (global.logger) global.logger.error('[APP ERROR] ' + err.message);
   console.error(err);
 

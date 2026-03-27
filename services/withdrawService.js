@@ -1,3 +1,4 @@
+// services/withdrawService.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
@@ -13,38 +14,61 @@ async function getActiveMethods() {
 
 // ─────────────────────────────────────────
 // CALCULATE FEE
+// يحسب الرسوم والصافي بالدولار
 // ─────────────────────────────────────────
-function calculateFee(method, amount) {
-  const amt = parseFloat(amount);
+function calculateFee(method, amountUsd) {
+  const amt = parseFloat(amountUsd);
   let fee   = 0;
 
   if (method.feeType === 'percentage') {
     fee = amt * parseFloat(method.feeValue);
   } else {
+    // ثابت بالدولار
     fee = parseFloat(method.feeValue);
   }
 
-  return {
-    fee:       parseFloat(fee.toFixed(4)),
-    netAmount: parseFloat((amt - fee).toFixed(4)),
-  };
+  fee = parseFloat(fee.toFixed(4));
+  const netAmount = parseFloat((amt - fee).toFixed(4));
+
+  return { fee, netAmount };
+}
+
+// ─────────────────────────────────────────
+// CALCULATE LOCAL AMOUNT
+// تحويل من دولار إلى العملة المحلية
+// ─────────────────────────────────────────
+function calculateLocalAmount(amountUsd, exchangeRate) {
+  const rate  = parseFloat(exchangeRate) || 1;
+  const local = parseFloat((parseFloat(amountUsd) * rate).toFixed(4));
+  return local;
 }
 
 // ─────────────────────────────────────────
 // CREATE WITHDRAWAL REQUEST
 // ─────────────────────────────────────────
-async function createWithdrawal(userId, methodId, amount, accountInfo) {
+async function createWithdrawal(userId, methodId, amountUsd, accountInfo) {
   const method = await prisma.withdrawMethod.findUnique({
     where: { id: parseInt(methodId) },
   });
   if (!method || !method.isActive) throw new Error('طريقة السحب غير متاحة');
 
-  const amt = parseFloat(amount);
-  if (amt < parseFloat(method.minAmount)) throw new Error(`الحد الأدنى للسحب ${method.minAmount}$`);
-  if (amt > parseFloat(method.maxAmount)) throw new Error(`الحد الأقصى للسحب ${method.maxAmount}$`);
+  const amt          = parseFloat(amountUsd);
+  const minAmountUsd = parseFloat(method.minAmount);
+  const maxAmountUsd = parseFloat(method.maxAmount);
+
+  if (amt < minAmountUsd) {
+    throw new Error(`الحد الأدنى للسحب ${minAmountUsd}$`);
+  }
+  if (amt > maxAmountUsd) {
+    throw new Error(`الحد الأقصى للسحب ${maxAmountUsd}$`);
+  }
 
   const { fee, netAmount } = calculateFee(method, amt);
   if (netAmount <= 0) throw new Error('المبلغ بعد الرسوم أقل من الصفر');
+
+  // حساب المبلغ المحلي
+  const exchangeRate  = parseFloat(method.exchangeRate) || 1;
+  const netAmountLocal = calculateLocalAmount(netAmount, exchangeRate);
 
   return prisma.$transaction(async (tx) => {
     const user = await tx.user.findUnique({ where: { id: parseInt(userId) } });
@@ -53,9 +77,8 @@ async function createWithdrawal(userId, methodId, amount, accountInfo) {
     const balance = parseFloat(user.balance);
     if (balance < amt) throw new Error('رصيد غير كافٍ');
 
-    // Deduct immediately
     const balanceBefore = balance;
-    const balanceAfter  = balance - amt;
+    const balanceAfter  = parseFloat((balance - amt).toFixed(4));
 
     await tx.user.update({
       where: { id: user.id },
@@ -64,19 +87,20 @@ async function createWithdrawal(userId, methodId, amount, accountInfo) {
 
     const withdrawal = await tx.withdrawal.create({
       data: {
-        userId:     user.id,
-        methodId:   parseInt(methodId),
-        amount:     amt,
+        userId:         user.id,
+        methodId:       parseInt(methodId),
+        amount:         amt,
         fee,
         netAmount,
-        accountInfo,
-        status:     'PENDING',
+        // حفظ المبلغ المحلي في accountInfo
+        accountInfo:    accountInfo,
+        status:         'PENDING',
       },
     });
 
     await tx.walletTransaction.create({
       data: {
-        userId,
+        userId:        user.id,
         type:          'WITHDRAW',
         amount:        amt,
         balanceBefore,
@@ -86,7 +110,7 @@ async function createWithdrawal(userId, methodId, amount, accountInfo) {
       },
     });
 
-    return withdrawal;
+    return { ...withdrawal, netAmountLocal, exchangeRate };
   });
 }
 
@@ -94,7 +118,9 @@ async function createWithdrawal(userId, methodId, amount, accountInfo) {
 // APPROVE WITHDRAWAL
 // ─────────────────────────────────────────
 async function approveWithdrawal(withdrawalId) {
-  const w = await prisma.withdrawal.findUnique({ where: { id: parseInt(withdrawalId) } });
+  const w = await prisma.withdrawal.findUnique({
+    where: { id: parseInt(withdrawalId) },
+  });
   if (!w) throw new Error('السحب غير موجود');
   if (w.status !== 'PENDING') throw new Error('تم معالجة هذا السحب مسبقاً');
 
@@ -115,7 +141,7 @@ async function completeWithdrawal(withdrawalId) {
 }
 
 // ─────────────────────────────────────────
-// REJECT WITHDRAWAL (refund balance)
+// REJECT WITHDRAWAL — استرداد الرصيد
 // ─────────────────────────────────────────
 async function rejectWithdrawal(withdrawalId, adminNote = '') {
   return prisma.$transaction(async (tx) => {
@@ -127,10 +153,9 @@ async function rejectWithdrawal(withdrawalId, adminNote = '') {
       throw new Error('لا يمكن رفض هذا السحب');
     }
 
-    // Refund balance
     const user   = await tx.user.findUnique({ where: { id: w.userId } });
     const before = parseFloat(user.balance);
-    const after  = before + parseFloat(w.amount);
+    const after  = parseFloat((before + parseFloat(w.amount)).toFixed(4));
 
     await tx.user.update({
       where: { id: w.userId },
@@ -169,7 +194,7 @@ async function getWithdrawals({ page = 1, limit = 20, status = null, userId = nu
     prisma.withdrawal.findMany({
       where,
       skip,
-      take: limit,
+      take:    limit,
       orderBy: { createdAt: 'desc' },
       include: { user: true, method: true },
     }),
@@ -182,6 +207,7 @@ async function getWithdrawals({ page = 1, limit = 20, status = null, userId = nu
 module.exports = {
   getActiveMethods,
   calculateFee,
+  calculateLocalAmount,
   createWithdrawal,
   approveWithdrawal,
   completeWithdrawal,

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>إدارة التصنيفات | لوحة التحكم</title>
+  <link rel="stylesheet" href="/public/css/admin.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <style>
+    .cat-tree-item {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      background: #fff;
+    }
+    .cat-tree-item.is-child {
+      margin-right: 32px;
+      border-color: #c7d2fe;
+      background: #f5f7ff;
+    }
+    .cat-tree-item.is-grandchild {
+      margin-right: 64px;
+      border-color: #a5b4fc;
+      background: #eef2ff;
+    }
+    .cat-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      gap: 12px;
+    }
+    .cat-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+      flex: 1;
+    }
+    .cat-meta {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .quick-assign {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .quick-assign select {
+      padding: 4px 8px;
+      font-size: 0.8rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      min-width: 200px;
+      background: #fff;
+    }
+    .bulk-section {
+      background: #f0f9ff;
+      border: 1px solid #bae6fd;
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .root-badge {
+      background: #d1fae5;
+      color: #065f46;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .child-badge {
+      background: #e0e7ff;
+      color: #3730a3;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+<%- include('partials/sidebar') %>
+<div class="main-content">
+  <%- include('partials/topbar', { title: 'إدارة التصنيفات' }) %>
+  <main class="page-content">
+    <%- include('partials/alerts') %>
+
+    <!-- HEADER -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <h2 style="font-size:1.1rem;">
+        إدارة التصنيفات
+        <span class="badge badge-info" style="margin-right:8px;"><%= groups.length %> تصنيف</span>
+      </h2>
+      <a href="/admin/products" class="btn btn-outline btn-sm">
+        <i class="bi bi-arrow-right"></i> رجوع للمنتجات
+      </a>
+    </div>
+
+    <!-- INSTRUCTIONS -->
+    <div class="bulk-section">
+      <h3 style="font-size:0.95rem;font-weight:700;margin-bottom:10px;">
+        💡 كيفية ضبط الهرمية بعد مزامنة Satofill
+      </h3>
+      <p style="font-size:0.85rem;color:#0369a1;margin-bottom:8px;">
+        Satofill API يُرجع التصنيفات بدون معلومات الأب، لذا تظهر كلها كتصنيفات رئيسية.
+        <strong>افعل هذا مرة واحدة فقط:</strong>
+      </p>
+      <ol style="font-size:0.85rem;color:#0369a1;margin-right:16px;line-height:1.8;">
+        <li>أنشئ التصنيفات الرئيسية (الألعاب، تطبيقات، اشتراكات، ...)</li>
+        <li>لكل تصنيف فرعي، اختر التصنيف الأب من القائمة المنسدلة واضغط ✔</li>
+        <li>بعد الضبط، البوت سيعرض التصنيفات الرئيسية فقط ثم يتدرج للفرعية</li>
+      </ol>
+    </div>
+
+    <!-- CREATE ROOT CATEGORY -->
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-header">➕ إضافة تصنيف رئيسي جديد</div>
+      <div class="card-body">
+        <form action="/admin/categories/create" method="POST"
+              style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <div class="form-group" style="margin:0;flex:1;min-width:200px;">
+            <label class="form-label">اسم التصنيف</label>
+            <input type="text" name="name" class="form-control"
+                   placeholder="مثال: الألعاب" required>
+          </div>
+          <div class="form-group" style="margin:0;min-width:200px;">
+            <label class="form-label">التصنيف الأب (اتركه فارغاً للرئيسي)</label>
+            <select name="parentId" class="form-control">
+              <option value="">— تصنيف رئيسي —</option>
+              <% groups.forEach(function(g) { %>
+                <option value="<%= g.id %>">
+                  <%= g.parent ? '└─ ' : '' %><%= g.name %>
+                </option>
+              <% }) %>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary" style="white-space:nowrap;">
+            <i class="bi bi-plus-lg"></i> إضافة
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;">
+      <div class="stat-card">
+        <div>
+          <div class="stat-value" style="color:#10b981;">
+            <%= groups.filter(g => !g.parentId).length %>
+          </div>
+          <div class="stat-label">تصنيف رئيسي</div>
+        </div>
+        <div class="stat-icon">📁</div>
+      </div>
+      <div class="stat-card">
+        <div>
+          <div class="stat-value" style="color:#4f46e5;">
+            <%= groups.filter(g => g.parentId).length %>
+          </div>
+          <div class="stat-label">تصنيف فرعي</div>
+        </div>
+        <div class="stat-icon">📂</div>
+      </div>
+      <div class="stat-card">
+        <div>
+          <div class="stat-value" style="color:#f59e0b;">
+            <%= groups.filter(g => !g.parentId && g._count.products === 0 && g.children.length === 0).length %>
+          </div>
+          <div class="stat-label">تصنيف فارغ</div>
+        </div>
+        <div class="stat-icon">🗑️</div>
+      </div>
+    </div>
+
+    <!-- CATEGORIES LIST -->
+    <div class="card">
+      <div class="card-header">
+        🗂️ قائمة التصنيفات — اضغط ✔ لحفظ كل تغيير
+      </div>
+      <div style="padding:16px;">
+
+        <% groups.forEach(function(g) {
+          const depthClass = !g.parentId ? '' : (g.parent && g.parent.parentId ? 'is-grandchild' : 'is-child');
+          const icon       = !g.parentId ? '📁' : '📂';
+        %>
+        <div class="cat-tree-item <%= depthClass %>">
+          <div class="cat-header">
+
+            <!-- NAME + BADGES -->
+            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+              <span style="font-size:1.1rem;"><%= icon %></span>
+              <span class="cat-name"><%= g.name %></span>
+              <% if (!g.parentId) { %>
+                <span class="root-badge">رئيسي</span>
+              <% } else { %>
+                <span class="child-badge">فرعي</span>
+              <% } %>
+              <% if (g._count.products > 0) { %>
+                <span class="badge badge-success"><%= g._count.products %> منتج</span>
+              <% } %>
+              <% if (g.children.length > 0) { %>
+                <span class="badge badge-warning"><%= g.children.length %> فرعي</span>
+              <% } %>
+            </div>
+
+            <!-- QUICK ASSIGN PARENT -->
+            <form action="/admin/categories/<%= g.id %>/parent" method="POST"
+                  class="quick-assign">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <select name="parentId">
+                <option value="">— تصنيف رئيسي —</option>
+                <% groups.forEach(function(x) { %>
+                  <% if (x.id !== g.id) { %>
+                    <option value="<%= x.id %>"
+                      <%= g.parentId === x.id ? 'selected' : '' %>>
+                      <%= x.parent ? '└─ ' : '' %><%= x.name %>
+                    </option>
+                  <% } %>
+                <% }) %>
+              </select>
+              <button type="submit" class="btn btn-sm btn-primary"
+                      title="حفظ التصنيف الأب">
+                ✔
+              </button>
+            </form>
+
+            <!-- DELETE -->
+            <% if (g._count.products === 0 && g.children.length === 0) { %>
+            <form action="/admin/categories/<%= g.id %>/delete" method="POST">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button class="btn btn-sm btn-danger"
+                      onclick="return confirm('حذف التصنيف <%= g.name %>؟')"
+                      title="حذف">
+                <i class="bi bi-trash"></i>
+              </button>
+            </form>
+            <% } %>
+
+          </div>
+        </div>
+        <% }) %>
+
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  setTimeout(function () {
+    document.querySelectorAll('.alert').forEach(function (el) {
+      el.style.transition = 'opacity 0.5s';
+      el.style.opacity    = '0';
+      setTimeout(function () { el.remove(); }, 500);
+    });
+  }, 4000);
+</script>
+
+</body>
+</html>

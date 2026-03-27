@@ -7,10 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─────────────────────────────────────────
-// ENUMS
-// ─────────────────────────────────────────
-
 enum VipLevel {
   NORMAL
   BRONZE
@@ -56,10 +52,6 @@ enum SupportStatus {
   CLOSED
 }
 
-// ─────────────────────────────────────────
-// USERS
-// ─────────────────────────────────────────
-
 model User {
   id             Int       @id @default(autoincrement())
   telegramId     BigInt    @unique
@@ -85,7 +77,6 @@ model User {
   withdrawals     Withdrawal[]
   orders          Order[]
   manualOrders    ManualOrder[]
-  // ← الإصلاح الحرجي: اسم صريح للعلاقتين
   transactions    WalletTransaction[] @relation("UserTransactions")
   transfersOut    WalletTransaction[] @relation("TransferOut")
   referralGiven   Referral[]          @relation("ReferralFrom")
@@ -97,10 +88,6 @@ model User {
   @@index([referredById])
   @@map("users")
 }
-
-// ─────────────────────────────────────────
-// ADMINS
-// ─────────────────────────────────────────
 
 model Admin {
   id           Int       @id @default(autoincrement())
@@ -120,14 +107,9 @@ model Admin {
   @@map("admins")
 }
 
-// ─────────────────────────────────────────
-// WALLET TRANSACTIONS
-// ─────────────────────────────────────────
-
 model WalletTransaction {
   id            Int             @id @default(autoincrement())
   userId        Int
-  // ← الإصلاح: اسم صريح يطابق ما في User
   user          User            @relation("UserTransactions", fields: [userId], references: [id])
   type          TransactionType
   amount        Decimal         @db.Decimal(18, 4)
@@ -136,7 +118,6 @@ model WalletTransaction {
   description   String?
   refId         String?
   transferToId  Int?
-  // ← الإصلاح: اسم صريح يطابق ما في User
   transferTo    User?           @relation("TransferOut", fields: [transferToId], references: [id])
   createdAt     DateTime        @default(now())
 
@@ -145,10 +126,6 @@ model WalletTransaction {
   @@index([createdAt])
   @@map("wallet_transactions")
 }
-
-// ─────────────────────────────────────────
-// DEPOSITS
-// ─────────────────────────────────────────
 
 model DepositMethod {
   id           Int      @id @default(autoincrement())
@@ -193,23 +170,22 @@ model Deposit {
   @@map("deposits")
 }
 
-// ─────────────────────────────────────────
-// WITHDRAWALS
-// ─────────────────────────────────────────
-
 model WithdrawMethod {
-  id          Int      @id @default(autoincrement())
-  name        String
-  nameAr      String?
-  description String?
-  minAmount   Decimal  @db.Decimal(18, 4)
-  maxAmount   Decimal  @db.Decimal(18, 4)
-  feeType     String   @default("percentage")
-  feeValue    Decimal  @db.Decimal(10, 4)
-  isActive    Boolean  @default(true)
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  name         String
+  nameAr       String?
+  description  String?
+  minAmount    Decimal  @db.Decimal(18, 4)
+  maxAmount    Decimal  @db.Decimal(18, 4)
+  // ✅ سعر الصرف — 1 = دولار مباشرة
+  exchangeRate Decimal  @default(1) @db.Decimal(18, 6)
+  feeType      String   @default("percentage")
+  feeValue     Decimal  @db.Decimal(10, 4)
+  instructions String?
+  isActive     Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   withdrawals Withdrawal[]
 
@@ -239,28 +215,23 @@ model Withdrawal {
   @@map("withdrawals")
 }
 
-// ─────────────────────────────────────────
-// PRODUCTS & GROUPS
-// ─────────────────────────────────────────
-
 model ProductGroup {
-  id        Int      @id @default(autoincrement())
+  id        Int            @id @default(autoincrement())
   name      String
   nameAr    String?
-  // التصنيف الأب (null = تصنيف رئيسي)
   parentId  Int?
   parent    ProductGroup?  @relation("GroupHierarchy", fields: [parentId], references: [id])
   children  ProductGroup[] @relation("GroupHierarchy")
-  isActive  Boolean  @default(true)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isActive  Boolean        @default(true)
+  sortOrder Int            @default(0)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 
   products Product[]
 
+  @@unique([name, parentId])
   @@index([parentId])
   @@map("product_groups")
-  @@unique([name, parentId])
 }
 
 model Product {
@@ -271,6 +242,7 @@ model Product {
   name         String
   nameAr       String?
   description  String?
+  customFields String?
   priceUsd     Decimal      @db.Decimal(18, 6)
   profitMargin Decimal      @default(0.20) @db.Decimal(5, 4)
   minQuantity  Int          @default(1)
@@ -288,10 +260,6 @@ model Product {
   @@index([satofillId])
   @@map("products")
 }
-
-// ─────────────────────────────────────────
-// ORDERS
-// ─────────────────────────────────────────
 
 model Order {
   id              Int         @id @default(autoincrement())
@@ -338,10 +306,6 @@ model ManualOrder {
   @@map("manual_orders")
 }
 
-// ─────────────────────────────────────────
-// REFERRALS
-// ─────────────────────────────────────────
-
 model Referral {
   id         Int      @id @default(autoincrement())
   fromUserId Int
@@ -358,10 +322,6 @@ model Referral {
   @@map("referrals")
 }
 
-// ─────────────────────────────────────────
-// SETTINGS
-// ─────────────────────────────────────────
-
 model Setting {
   id        Int      @id @default(autoincrement())
   key       String   @unique
@@ -370,10 +330,6 @@ model Setting {
 
   @@map("settings")
 }
-
-// ─────────────────────────────────────────
-// SUPPORT MESSAGES
-// ─────────────────────────────────────────
 
 model SupportMessage {
   id        Int           @id @default(autoincrement())
@@ -390,10 +346,6 @@ model SupportMessage {
   @@map("support_messages")
 }
 
-// ─────────────────────────────────────────
-// AUDIT LOGS
-// ─────────────────────────────────────────
-
 model AuditLog {
   id         Int      @id @default(autoincrement())
   adminId    Int?
@@ -409,10 +361,6 @@ model AuditLog {
   @@index([action])
   @@map("audit_logs")
 }
-
-// ─────────────────────────────────────────
-// BROADCAST LOGS
-// ─────────────────────────────────────────
 
 model BroadcastLog {
   id          Int      @id @default(autoincrement())

@@ -1,3 +1,4 @@
+// admin/controllers/methodsController.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { logAudit } = require('../../middleware/auth');
@@ -16,10 +17,16 @@ async function depositCreateForm(req, res) {
 async function depositCreate(req, res) {
   const { name, nameAr, description, minAmount, maxAmount, exchangeRate, instructions } = req.body;
   try {
+    if (!name)         throw new Error('الاسم مطلوب');
+    if (!exchangeRate) throw new Error('سعر الصرف مطلوب');
+    if (!minAmount)    throw new Error('الحد الأدنى مطلوب');
+    if (!maxAmount)    throw new Error('الحد الأقصى مطلوب');
+
     const m = await prisma.depositMethod.create({
       data: {
-        name, nameAr: nameAr || null,
-        description:  description || null,
+        name,
+        nameAr:       nameAr       || null,
+        description:  description  || null,
         minAmount:    parseFloat(minAmount),
         maxAmount:    parseFloat(maxAmount),
         exchangeRate: parseFloat(exchangeRate),
@@ -27,7 +34,10 @@ async function depositCreate(req, res) {
         isActive:     true,
       },
     });
-    await logAudit({ adminId: req.session.admin.id, action: 'CREATE_DEPOSIT_METHOD', targetId: m.id, ipAddress: req.ip });
+    await logAudit({
+      adminId: req.session.admin.id, action: 'CREATE_DEPOSIT_METHOD',
+      targetId: m.id, ipAddress: req.ip,
+    });
     req.session.success = 'تم إضافة طريقة الإيداع';
     res.redirect('/admin/deposit-methods');
   } catch (err) {
@@ -37,7 +47,9 @@ async function depositCreate(req, res) {
 }
 
 async function depositEditForm(req, res) {
-  const method = await prisma.depositMethod.findUnique({ where: { id: parseInt(req.params.id) } });
+  const method = await prisma.depositMethod.findUnique({
+    where: { id: parseInt(req.params.id) },
+  });
   if (!method) { req.session.error = 'غير موجود'; return res.redirect('/admin/deposit-methods'); }
   res.render('deposit-method-form', { title: `تعديل: ${method.name}`, method });
 }
@@ -46,16 +58,25 @@ async function depositUpdate(req, res) {
   const id = parseInt(req.params.id);
   const { name, nameAr, description, minAmount, maxAmount, exchangeRate, instructions } = req.body;
   try {
+    if (!name)         throw new Error('الاسم مطلوب');
+    if (!exchangeRate) throw new Error('سعر الصرف مطلوب');
+
     await prisma.depositMethod.update({
       where: { id },
       data: {
-        name, nameAr: nameAr || null, description: description || null,
-        minAmount: parseFloat(minAmount), maxAmount: parseFloat(maxAmount),
-        exchangeRate: parseFloat(exchangeRate), instructions: instructions || null,
+        name,
+        nameAr:       nameAr       || null,
+        description:  description  || null,
+        minAmount:    parseFloat(minAmount),
+        maxAmount:    parseFloat(maxAmount),
+        exchangeRate: parseFloat(exchangeRate),
+        instructions: instructions || null,
       },
     });
     req.session.success = 'تم تحديث طريقة الإيداع';
-  } catch (err) { req.session.error = err.message; }
+  } catch (err) {
+    req.session.error = err.message;
+  }
   res.redirect('/admin/deposit-methods');
 }
 
@@ -79,17 +100,40 @@ async function withdrawCreateForm(req, res) {
 }
 
 async function withdrawCreate(req, res) {
-  const { name, nameAr, description, minAmount, maxAmount, feeType, feeValue } = req.body;
+  const {
+    name, nameAr, description,
+    minAmount, maxAmount,
+    exchangeRate,
+    feeType, feeValue,
+    instructions,
+  } = req.body;
+
   try {
+    if (!name)      throw new Error('الاسم مطلوب');
+    if (!minAmount) throw new Error('الحد الأدنى مطلوب');
+    if (!maxAmount) throw new Error('الحد الأقصى مطلوب');
+    if (!feeValue)  throw new Error('قيمة الرسوم مطلوبة');
+
     const m = await prisma.withdrawMethod.create({
       data: {
-        name, nameAr: nameAr || null, description: description || null,
-        minAmount: parseFloat(minAmount), maxAmount: parseFloat(maxAmount),
-        feeType: feeType || 'percentage', feeValue: parseFloat(feeValue),
-        isActive: true,
+        name,
+        nameAr:       nameAr       || null,
+        description:  description  || null,
+        minAmount:    parseFloat(minAmount),
+        maxAmount:    parseFloat(maxAmount),
+        // ✅ سعر الصرف — 1 يعني الدولار مباشرة
+        exchangeRate: parseFloat(exchangeRate || '1'),
+        feeType:      feeType || 'percentage',
+        feeValue:     parseFloat(feeValue),
+        instructions: instructions || null,
+        isActive:     true,
       },
     });
-    await logAudit({ adminId: req.session.admin.id, action: 'CREATE_WITHDRAW_METHOD', targetId: m.id, ipAddress: req.ip });
+
+    await logAudit({
+      adminId: req.session.admin.id, action: 'CREATE_WITHDRAW_METHOD',
+      targetId: m.id, ipAddress: req.ip,
+    });
     req.session.success = 'تم إضافة طريقة السحب';
     res.redirect('/admin/withdraw-methods');
   } catch (err) {
@@ -99,25 +143,45 @@ async function withdrawCreate(req, res) {
 }
 
 async function withdrawEditForm(req, res) {
-  const method = await prisma.withdrawMethod.findUnique({ where: { id: parseInt(req.params.id) } });
+  const method = await prisma.withdrawMethod.findUnique({
+    where: { id: parseInt(req.params.id) },
+  });
   if (!method) { req.session.error = 'غير موجود'; return res.redirect('/admin/withdraw-methods'); }
   res.render('withdraw-method-form', { title: `تعديل: ${method.name}`, method });
 }
 
 async function withdrawUpdate(req, res) {
   const id = parseInt(req.params.id);
-  const { name, nameAr, description, minAmount, maxAmount, feeType, feeValue } = req.body;
+  const {
+    name, nameAr, description,
+    minAmount, maxAmount,
+    exchangeRate,
+    feeType, feeValue,
+    instructions,
+  } = req.body;
+
   try {
+    if (!name)     throw new Error('الاسم مطلوب');
+    if (!feeValue) throw new Error('قيمة الرسوم مطلوبة');
+
     await prisma.withdrawMethod.update({
       where: { id },
       data: {
-        name, nameAr: nameAr || null, description: description || null,
-        minAmount: parseFloat(minAmount), maxAmount: parseFloat(maxAmount),
-        feeType, feeValue: parseFloat(feeValue),
+        name,
+        nameAr:       nameAr       || null,
+        description:  description  || null,
+        minAmount:    parseFloat(minAmount),
+        maxAmount:    parseFloat(maxAmount),
+        exchangeRate: parseFloat(exchangeRate || '1'),
+        feeType:      feeType || 'percentage',
+        feeValue:     parseFloat(feeValue),
+        instructions: instructions || null,
       },
     });
     req.session.success = 'تم تحديث طريقة السحب';
-  } catch (err) { req.session.error = err.message; }
+  } catch (err) {
+    req.session.error = err.message;
+  }
   res.redirect('/admin/withdraw-methods');
 }
 
@@ -130,6 +194,8 @@ async function withdrawToggle(req, res) {
 }
 
 module.exports = {
-  depositIndex, depositCreateForm, depositCreate, depositEditForm, depositUpdate, depositToggle,
-  withdrawIndex, withdrawCreateForm, withdrawCreate, withdrawEditForm, withdrawUpdate, withdrawToggle,
+  depositIndex, depositCreateForm, depositCreate,
+  depositEditForm, depositUpdate, depositToggle,
+  withdrawIndex, withdrawCreateForm, withdrawCreate,
+  withdrawEditForm, withdrawUpdate, withdrawToggle,
 };

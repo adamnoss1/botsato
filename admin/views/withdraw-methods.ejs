@@ -12,40 +12,55 @@ const pageBody = `
     <table>
       <thead>
         <tr>
-          <th>#</th><th>الاسم</th><th>الرسوم</th><th>الحد الأدنى</th>
-          <th>الحد الأقصى</th><th>الحالة</th><th>إجراء</th>
+          <th>#</th><th>الاسم</th><th>سعر الصرف</th>
+          <th>الحد الأدنى</th><th>الحد الأقصى</th>
+          <th>الرسوم</th><th>الحالة</th><th>إجراء</th>
         </tr>
       </thead>
       <tbody>
-        ${methods.map(m => `
-        <tr>
-          <td>${m.id}</td>
-          <td><strong>${m.name}</strong></td>
-          <td>
-            ${m.feeType === 'percentage'
-              ? (parseFloat(m.feeValue)*100).toFixed(1)+'%'
-              : parseFloat(m.feeValue).toFixed(2)+'$'}
-          </td>
-          <td>${m.minAmount}$</td>
-          <td>${m.maxAmount}$</td>
-          <td>
-            <span class="badge ${m.isActive ? 'badge-success' : 'badge-danger'}">
-              ${m.isActive ? 'نشط' : 'معطل'}
-            </span>
-          </td>
-          <td style="display:flex;gap:6px;">
-            <a href="/admin/withdraw-methods/${m.id}/edit" class="btn btn-sm btn-primary">
-              <i class="bi bi-pencil"></i> تعديل
-            </a>
-            <form action="/admin/withdraw-methods/${m.id}/toggle" method="POST">
-              <input type="hidden" name="_csrf" value="${csrfToken}">
-              <button class="btn btn-sm ${m.isActive ? 'btn-warning' : 'btn-success'}">
-                ${m.isActive ? 'تعطيل' : 'تفعيل'}
-              </button>
-            </form>
-          </td>
-        </tr>
-        `).join('')}
+        ${methods.map(m => {
+          const rate    = parseFloat(m.exchangeRate) || 1;
+          const rateStr = rate === 1 ? '$' : '1$ = ' + rate;
+          const feeStr  = m.feeType === 'percentage'
+            ? (parseFloat(m.feeValue)*100).toFixed(1) + '%'
+            : parseFloat(m.feeValue).toFixed(2) + '$';
+          return `
+          <tr>
+            <td>${m.id}</td>
+            <td>
+              <strong>${m.name}</strong>
+              ${m.nameAr ? '<br><small style="color:#6b7280;">'+m.nameAr+'</small>' : ''}
+              ${m.instructions ? '<br><small style="color:#9ca3af;font-size:0.72rem;">'+m.instructions.substring(0,40)+'...</small>' : ''}
+            </td>
+            <td>
+              <span class="badge ${rate === 1 ? 'badge-secondary' : 'badge-info'}">
+                ${rateStr}
+              </span>
+            </td>
+            <td>${m.minAmount}$</td>
+            <td>${m.maxAmount}$</td>
+            <td>
+              <span class="badge badge-warning">${feeStr}</span>
+            </td>
+            <td>
+              <span class="badge ${m.isActive ? 'badge-success' : 'badge-danger'}">
+                ${m.isActive ? 'نشط' : 'معطل'}
+              </span>
+            </td>
+            <td style="display:flex;gap:6px;">
+              <a href="/admin/withdraw-methods/${m.id}/edit" class="btn btn-sm btn-primary">
+                <i class="bi bi-pencil"></i> تعديل
+              </a>
+              <form action="/admin/withdraw-methods/${m.id}/toggle" method="POST">
+                <input type="hidden" name="_csrf" value="${csrfToken}">
+                <button class="btn btn-sm ${m.isActive ? 'btn-warning' : 'btn-success'}">
+                  ${m.isActive ? 'تعطيل' : 'تفعيل'}
+                </button>
+              </form>
+            </td>
+          </tr>
+          `;
+        }).join('')}
       </tbody>
     </table>
   </div>

@@ -1,15 +1,19 @@
+// services/orderService.js
 const { PrismaClient } = require('@prisma/client');
 const prisma   = new PrismaClient();
 const satofill = require('../satofill/satofillClient');
 const { debitBalance } = require('./walletService');
 const { creditReferral } = require('./referralService');
 
-var productCache   = [];
-var cacheUpdatedAt = null;
+let productCache   = [];
+let cacheUpdatedAt = null;
 
+// ─────────────────────────────────────────
+// PRODUCT CACHE
+// ─────────────────────────────────────────
 async function refreshProductCache() {
   try {
-    var services = await satofill.getServices();
+    const services = await satofill.getServices();
     productCache   = services;
     cacheUpdatedAt = new Date();
     return services;
@@ -23,13 +27,16 @@ function getProductCache() {
   return { products: productCache, updatedAt: cacheUpdatedAt };
 }
 
+// ─────────────────────────────────────────
+// PRICE CALCULATION
+// ─────────────────────────────────────────
 function calculatePrice(priceUsd, quantity, profitMargin, exchangeRate, vipDiscount) {
-  vipDiscount = vipDiscount || 0;
-  var base       = parseFloat(priceUsd) * parseInt(quantity);
-  var withProfit = base * (1 + parseFloat(profitMargin));
-  var discount   = withProfit * parseFloat(vipDiscount);
-  var finalUsd   = withProfit - discount;
-  var finalLocal = finalUsd * parseFloat(exchangeRate);
+  vipDiscount  = vipDiscount  || 0;
+  const base       = parseFloat(priceUsd) * parseInt(quantity);
+  const withProfit = base * (1 + parseFloat(profitMargin));
+  const discount   = withProfit * parseFloat(vipDiscount);
+  const finalUsd   = withProfit - discount;
+  const finalLocal = finalUsd * parseFloat(exchangeRate);
   return {
     baseUsd:    parseFloat(base.toFixed(6)),
     finalUsd:   parseFloat(finalUsd.toFixed(6)),
@@ -37,9 +44,12 @@ function calculatePrice(priceUsd, quantity, profitMargin, exchangeRate, vipDisco
   };
 }
 
+// ─────────────────────────────────────────
+// VIP DISCOUNT
+// ─────────────────────────────────────────
 async function getVipDiscount(vipLevel) {
-  var settingsSvc = require('./settingsService');
-  var map = {
+  const settingsSvc = require('./settingsService');
+  const map = {
     NORMAL: 0,
     BRONZE: parseFloat(await settingsSvc.getSetting('vip_bronze_discount') || '0.02'),
     SILVER: parseFloat(await settingsSvc.getSetting('vip_silver_discount') || '0.05'),
@@ -48,9 +58,12 @@ async function getVipDiscount(vipLevel) {
   return map[vipLevel] || 0;
 }
 
+// ─────────────────────────────────────────
+// CHECK DUPLICATE ORDER (آخر 5 دقائق)
+// ─────────────────────────────────────────
 async function checkDuplicateOrder(userId, productId) {
-  var fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-  var existing = await prisma.order.findFirst({
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+  const existing = await prisma.order.findFirst({
     where: {
       userId:    parseInt(userId),
       productId: parseInt(productId),
@@ -61,8 +74,54 @@ async function checkDuplicateOrder(userId, productId) {
   return !!existing;
 }
 
+// ─────────────────────────────────────────
+// BUILD CUSTOM FIELDS
+// ✅ يقرأ custom_fields من بيانات المنتج المخزنة
+// ─────────────────────────────────────────
+function buildCustomFields(product, userInput) {
+  // إذا لم توجد custom_fields محفوظة — fallback
+  if (!product.customFields) {
+    return { link: userInput, url: userInput };
+  }
+
+  let fields = [];
+  try {
+    fields = JSON.parse(product.customFields);
+  } catch (_) {
+    return { link: userInput, url: userInput };
+  }
+
+  if (!Array.isArray(fields) || fields.length === 0) {
+    return { link: userInput, url: userInput };
+  }
+
+  const result = {};
+
+  for (const field of fields) {
+    if (!field.key) continue;
+    // كل الحقول النصية المطلوبة تأخذ قيمة userInput
+    if (field.type === 'text' || field.type === 'number' || !field.type) {
+      result[field.key] = userInput;
+    }
+  }
+
+  // إذا لم نتمكن من تعيين أي حقل
+  if (Object.keys(result).length === 0) {
+    result[fields[0].key] = userInput;
+  }
+
+  if (global.logger) {
+    global.logger.info('[ORDER] Built customFields: ' + JSON.stringify(result));
+  }
+
+  return result;
+}
+
+// ─────────────────────────────────────────
+// CREATE AUTO ORDER
+// ─────────────────────────────────────────
 async function createAutoOrder(userId, productId, quantity, link) {
-  var product = await prisma.product.findUnique({
+  const product = await prisma.product.findUnique({
     where:   { id: parseInt(productId) },
     include: { group: true },
   });
@@ -71,25 +130,26 @@ async function createAutoOrder(userId, productId, quantity, link) {
   if (product.isManual)              throw new Error('هذه خدمة يدوية');
   if (!product.satofillId)           throw new Error('الخدمة غير مرتبطة بـ Satofill');
 
-  var qty = parseInt(quantity);
-  if (qty < product.minQuantity) throw new Error('الحد الأدنى ' + product.minQuantity);
-  if (qty > product.maxQuantity) throw new Error('الحد الأقصى ' + product.maxQuantity);
+  const qty = parseInt(quantity);
+  if (qty < product.minQuantity) throw new Error('الحد الأدنى للكمية: ' + product.minQuantity);
+  if (qty > product.maxQuantity) throw new Error('الحد الأقصى للكمية: ' + product.maxQuantity);
 
-  var user     = await prisma.user.findUnique({ where: { id: parseInt(userId) } });
-  var discount = await getVipDiscount(user.vipLevel);
+  const user     = await prisma.user.findUnique({ where: { id: parseInt(userId) } });
+  const discount = await getVipDiscount(user.vipLevel);
 
-  var settingsSvc  = require('./settingsService');
-  var exchangeRate = parseFloat(await settingsSvc.getSetting('exchange_rate') || '3.75');
-  var profitMargin = parseFloat(await settingsSvc.getSetting('profit_margin') || '0.20');
+  const settingsSvc  = require('./settingsService');
+  const exchangeRate = parseFloat(await settingsSvc.getSetting('exchange_rate') || '3.75');
+  const profitMargin = parseFloat(await settingsSvc.getSetting('profit_margin') || '0.20');
 
-  var pricePerUnit = parseFloat(product.priceUsd) * (1 + profitMargin) * (1 - discount);
-  var totalPrice   = parseFloat((pricePerUnit * qty * exchangeRate).toFixed(4));
+  const pricePerUnit = parseFloat(product.priceUsd) * (1 + profitMargin) * (1 - discount);
+  const totalPrice   = parseFloat((pricePerUnit * qty * exchangeRate).toFixed(4));
 
   if (parseFloat(user.balance) < totalPrice) {
     throw new Error('رصيد غير كافٍ. المطلوب: ' + totalPrice.toFixed(2) + '$');
   }
 
-  var order = await prisma.order.create({
+  // إنشاء الطلب في DB
+  const order = await prisma.order.create({
     data: {
       userId:      parseInt(userId),
       productId:   parseInt(productId),
@@ -101,6 +161,7 @@ async function createAutoOrder(userId, productId, quantity, link) {
     },
   });
 
+  // خصم الرصيد
   await debitBalance(
     parseInt(userId),
     totalPrice,
@@ -110,46 +171,67 @@ async function createAutoOrder(userId, productId, quantity, link) {
   );
 
   try {
-    var satofillResult = await satofill.createOrder({
-      serviceId: product.satofillId,
-      quantity:  qty,
-      link,
+    // ✅ بناء custom_fields الصحيحة
+    const customFields = buildCustomFields(product, link);
+
+    if (global.logger) {
+      global.logger.info(
+        '[ORDER] Sending to Satofill — serviceId: ' + product.satofillId +
+        ' qty: ' + qty +
+        ' customFields: ' + JSON.stringify(customFields)
+      );
+    }
+
+    const satofillResult = await satofill.createOrder({
+      serviceId:    product.satofillId,
+      quantity:     qty,
+      customFields,
     });
 
+    // تحديث الطلب بـ Satofill order ID
+    const newStatus = satofillResult.status === 'completed' ? 'COMPLETED' : 'PROCESSING';
     await prisma.order.update({
       where: { id: order.id },
-      data:  { satofillOrderId: satofillResult.satofillOrderId, status: 'PROCESSING' },
+      data:  {
+        satofillOrderId: satofillResult.satofillOrderId,
+        status:          newStatus,
+      },
     });
 
     if (global.logger) {
-      global.logger.info('[ORDER] #' + order.id + ' → Satofill #' + satofillResult.satofillOrderId);
+      global.logger.info('[ORDER] #' + order.id + ' → Satofill #' + satofillResult.satofillOrderId + ' status: ' + newStatus);
     }
 
   } catch (err) {
+    // فشل الإرسال لـ Satofill → استرداد الرصيد
     await prisma.order.update({
       where: { id: order.id },
       data:  { status: 'FAILED', adminNote: err.message },
     });
 
-    var walletSvc = require('./walletService');
+    const walletSvc = require('./walletService');
     await walletSvc.creditBalance(
       parseInt(userId),
       totalPrice,
       'REFUND',
-      'استرداد — فشل إنشاء الطلب',
+      'استرداد — فشل إنشاء الطلب: ' + err.message,
       String(order.id)
     );
 
     throw new Error('فشل إنشاء الطلب: ' + err.message);
   }
 
-  await creditReferral(parseInt(userId), order.id, totalPrice).catch(function() {});
+  // عمولة الإحالة
+  await creditReferral(parseInt(userId), order.id, totalPrice).catch(() => {});
 
   return order;
 }
 
+// ─────────────────────────────────────────
+// CREATE MANUAL ORDER
+// ─────────────────────────────────────────
 async function createManualOrder(userId, productId, quantity, accountInfo) {
-  var product = await prisma.product.findUnique({
+  const product = await prisma.product.findUnique({
     where: { id: parseInt(productId) },
   });
 
@@ -157,18 +239,18 @@ async function createManualOrder(userId, productId, quantity, accountInfo) {
     throw new Error('الخدمة غير متاحة');
   }
 
-  var qty  = parseInt(quantity);
-  var user = await prisma.user.findUnique({ where: { id: parseInt(userId) } });
+  const qty  = parseInt(quantity);
+  const user = await prisma.user.findUnique({ where: { id: parseInt(userId) } });
 
-  var settingsSvc  = require('./settingsService');
-  var exchangeRate = parseFloat(await settingsSvc.getSetting('exchange_rate') || '3.75');
-  var totalPrice   = parseFloat((parseFloat(product.priceUsd) * qty * exchangeRate).toFixed(4));
+  const settingsSvc  = require('./settingsService');
+  const exchangeRate = parseFloat(await settingsSvc.getSetting('exchange_rate') || '3.75');
+  const totalPrice   = parseFloat((parseFloat(product.priceUsd) * qty * exchangeRate).toFixed(4));
 
   if (parseFloat(user.balance) < totalPrice) {
-    throw new Error('رصيد غير كافٍ. المطلوب: ' + totalPrice.toFixed(2));
+    throw new Error('رصيد غير كافٍ. المطلوب: ' + totalPrice.toFixed(2) + '$');
   }
 
-  var manualOrder = await prisma.manualOrder.create({
+  const manualOrder = await prisma.manualOrder.create({
     data: {
       userId:     parseInt(userId),
       productId:  parseInt(productId),
@@ -187,25 +269,22 @@ async function createManualOrder(userId, productId, quantity, accountInfo) {
     String(manualOrder.id)
   );
 
-  var notifySvc = require('./notificationService');
-  await notifySvc.notifyAdminsManualOrder(manualOrder, user, product).catch(function() {});
+  const notifySvc = require('./notificationService');
+  await notifySvc.notifyAdminsManualOrder(manualOrder, user, product).catch(() => {});
 
   return manualOrder;
 }
 
-async function getOrders(options) {
-  options = options || {};
-  var page   = options.page   || 1;
-  var limit  = options.limit  || 20;
-  var status = options.status || null;
-  var userId = options.userId || null;
-  var skip   = (page - 1) * limit;
-  var where  = {};
-
+// ─────────────────────────────────────────
+// GET ORDERS (paginated)
+// ─────────────────────────────────────────
+async function getOrders({ page = 1, limit = 20, status = null, userId = null } = {}) {
+  const skip  = (page - 1) * limit;
+  const where = {};
   if (status) where.status = status;
   if (userId) where.userId = parseInt(userId);
 
-  var results = await Promise.all([
+  const [orders, total] = await Promise.all([
     prisma.order.findMany({
       where,
       skip,
@@ -216,204 +295,108 @@ async function getOrders(options) {
     prisma.order.count({ where }),
   ]);
 
-  return {
-    orders: results[0],
-    total:  results[1],
-    pages:  Math.ceil(results[1] / limit),
-    page,
-  };
+  return { orders, total, pages: Math.ceil(total / limit), page };
 }
 
-async function notifyUserOrderRefunded(order, status) {
-  try {
-    var bot = require('../bot/bot').bot;
-    if (!bot) return;
-    var user = await prisma.user.findUnique({ where: { id: order.userId } });
-    if (!user) return;
-    var emoji = status === 'CANCELLED' ? '🚫' : '❌';
-    var label = status === 'CANCELLED' ? 'ملغى' : 'فاشل';
-    await bot.telegram.sendMessage(
-      Number(user.telegramId),
-      emoji + ' *تحديث طلب #' + order.id + '*\n\n' +
-      'الحالة: *' + label + '*\n' +
-      'تم إعادة *' + parseFloat(order.totalPrice).toFixed(2) + '$* لرصيدك.',
-      { parse_mode: 'Markdown' }
-    );
-  } catch (_) {}
-}
-
-async function notifyUserOrderCompleted(order) {
-  try {
-    var bot = require('../bot/bot').bot;
-    if (!bot) return;
-    var user = await prisma.user.findUnique({ where: { id: order.userId } });
-    if (!user) return;
-    await bot.telegram.sendMessage(
-      Number(user.telegramId),
-      '✅ *تم إكمال طلبك #' + order.id + ' بنجاح!*',
-      { parse_mode: 'Markdown' }
-    );
-  } catch (_) {}
-}
-
-async function notifyUserOrderPartial(order, remains) {
-  try {
-    var bot = require('../bot/bot').bot;
-    if (!bot) return;
-    var user = await prisma.user.findUnique({ where: { id: order.userId } });
-    if (!user) return;
-    await bot.telegram.sendMessage(
-      Number(user.telegramId),
-      '⚠️ *طلبك #' + order.id + ' اكتمل جزئياً*\n' +
-      'الكمية المتبقية: *' + remains + '*\n' +
-      'تم استرداد قيمة المتبقي لرصيدك.',
-      { parse_mode: 'Markdown' }
-    );
-  } catch (_) {}
-}
-
-async function handlePartialRefund(order, result) {
-  var remains = result.remains || 0;
-
-  await prisma.$transaction(async function(tx) {
-    await tx.order.update({
-      where: { id: order.id },
-      data: {
-        status:     'PARTIAL',
-        remains,
-        startCount: result.startCount,
-        adminNote:  'طلب جزئي',
-      },
-    });
-
-    if (remains > 0) {
-      var pricePerUnit = parseFloat(order.pricePerUnit);
-      var refundAmount = parseFloat((pricePerUnit * remains).toFixed(4));
-
-      if (refundAmount > 0) {
-        var user = await tx.user.findUnique({ where: { id: order.userId } });
-        if (!user) return;
-
-        var balanceBefore = parseFloat(user.balance);
-        var balanceAfter  = balanceBefore + refundAmount;
-
-        await tx.user.update({
-          where: { id: order.userId },
-          data:  { balance: balanceAfter },
-        });
-
-        await tx.walletTransaction.create({
-          data: {
-            userId:        order.userId,
-            type:          'REFUND',
-            amount:        refundAmount,
-            balanceBefore,
-            balanceAfter,
-            description:   'استرداد جزئي — طلب #' + order.id,
-            refId:         String(order.id),
-          },
-        });
-      }
-    }
-  });
-
-  await notifyUserOrderPartial(order, remains).catch(function() {});
-}
-
+// ─────────────────────────────────────────
+// SYNC ORDER STATUSES (للاستخدام من الـ job)
+// ─────────────────────────────────────────
 async function syncOrderStatuses() {
-  var activeOrders = await prisma.order.findMany({
+  const activeOrders = await prisma.order.findMany({
     where: {
       status:          { in: ['PENDING', 'PROCESSING'] },
       satofillOrderId: { not: null },
     },
-    take: 50,
+    take:    50,
+    orderBy: { createdAt: 'asc' },
   });
 
   if (activeOrders.length === 0) return 0;
 
-  var synced = 0;
+  let synced = 0;
 
-  for (var i = 0; i < activeOrders.length; i++) {
-    var order = activeOrders[i];
+  for (const order of activeOrders) {
     try {
-      var result    = await satofill.checkOrderStatus(order.satofillOrderId);
-      var newStatus = satofill.mapStatus(result.status);
+      const result    = await satofill.checkOrderStatus(order.satofillOrderId);
+      const newStatus = satofill.mapStatus(result.status);
 
       if (newStatus === order.status) continue;
 
       if (global.logger) {
         global.logger.info(
-          '[SYNC] Order #' + order.id +
-          ': ' + order.status + ' -> ' + newStatus
+          '[ORDER SYNC] #' + order.id +
+          ' ' + order.status + ' → ' + newStatus
         );
       }
 
-      var refundStatuses = ['CANCELLED', 'FAILED'];
-
-      if (refundStatuses.includes(newStatus)) {
-        var orderRef = order;
-        await prisma.$transaction(async function(tx) {
+      if (newStatus === 'FAILED' || newStatus === 'CANCELLED') {
+        await prisma.$transaction(async (tx) => {
           await tx.order.update({
-            where: { id: orderRef.id },
-            data: {
-              status:    newStatus,
-              remains:   result.remains,
-              adminNote: 'رفض Satofill — استُردّ الرصيد',
-              updatedAt: new Date(),
-            },
+            where: { id: order.id },
+            data:  { status: newStatus, adminNote: 'Satofill: ' + result.status, updatedAt: new Date() },
           });
-
-          var user = await tx.user.findUnique({ where: { id: orderRef.userId } });
+          const user   = await tx.user.findUnique({ where: { id: order.userId } });
           if (!user) return;
-
-          var refundAmount  = parseFloat(orderRef.totalPrice);
-          var balanceBefore = parseFloat(user.balance);
-          var balanceAfter  = balanceBefore + refundAmount;
-
-          await tx.user.update({
-            where: { id: orderRef.userId },
-            data:  { balance: balanceAfter },
-          });
-
+          const before = parseFloat(user.balance);
+          const after  = parseFloat((before + parseFloat(order.totalPrice)).toFixed(4));
+          await tx.user.update({ where: { id: order.userId }, data: { balance: after } });
           await tx.walletTransaction.create({
             data: {
-              userId:        orderRef.userId,
-              type:          'REFUND',
-              amount:        refundAmount,
-              balanceBefore,
-              balanceAfter,
-              description:   'استرداد — طلب #' + orderRef.id + ' (' + newStatus + ')',
-              refId:         String(orderRef.id),
+              userId: order.userId, type: 'REFUND',
+              amount: parseFloat(order.totalPrice),
+              balanceBefore: before, balanceAfter: after,
+              description: 'استرداد — طلب #' + order.id + ' (' + newStatus + ')',
+              refId: String(order.id),
             },
           });
         });
 
-        await notifyUserOrderRefunded(order, newStatus).catch(function() {});
-
       } else if (newStatus === 'PARTIAL') {
-        await handlePartialRefund(order, result);
+        const remains      = parseInt(result.remains) || 0;
+        const refundAmount = remains > 0
+          ? parseFloat((parseFloat(order.pricePerUnit) * remains).toFixed(4))
+          : 0;
+
+        await prisma.$transaction(async (tx) => {
+          await tx.order.update({
+            where: { id: order.id },
+            data: { status: 'PARTIAL', remains, startCount: result.startCount || null, updatedAt: new Date() },
+          });
+          if (refundAmount > 0) {
+            const user   = await tx.user.findUnique({ where: { id: order.userId } });
+            if (!user) return;
+            const before = parseFloat(user.balance);
+            const after  = parseFloat((before + refundAmount).toFixed(4));
+            await tx.user.update({ where: { id: order.userId }, data: { balance: after } });
+            await tx.walletTransaction.create({
+              data: {
+                userId: order.userId, type: 'REFUND',
+                amount: refundAmount, balanceBefore: before, balanceAfter: after,
+                description: 'استرداد جزئي — طلب #' + order.id,
+                refId: String(order.id),
+              },
+            });
+          }
+        });
+
+      } else if (newStatus === 'COMPLETED') {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { status: 'COMPLETED', startCount: result.startCount || null, remains: 0, updatedAt: new Date() },
+        });
 
       } else {
         await prisma.order.update({
           where: { id: order.id },
-          data: {
-            status:     newStatus,
-            startCount: result.startCount,
-            remains:    result.remains,
-            updatedAt:  new Date(),
-          },
+          data: { status: newStatus, startCount: result.startCount || null, remains: result.remains || null, updatedAt: new Date() },
         });
-
-        if (newStatus === 'COMPLETED') {
-          await notifyUserOrderCompleted(order).catch(function() {});
-        }
       }
 
       synced++;
 
     } catch (err) {
       if (global.logger) {
-        global.logger.error('[SYNC] Order #' + order.id + ': ' + err.message);
+        global.logger.error('[ORDER SYNC] Error on #' + order.id + ': ' + err.message);
       }
     }
   }
@@ -426,6 +409,7 @@ module.exports = {
   getProductCache,
   calculatePrice,
   checkDuplicateOrder,
+  buildCustomFields,
   createAutoOrder,
   createManualOrder,
   getOrders,

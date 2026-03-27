@@ -1,12 +1,14 @@
+// admin/controllers/productsController.js
 const { PrismaClient }    = require('@prisma/client');
 const prisma   = new PrismaClient();
 const satofill = require('../../satofill/satofillClient');
 const { logAudit } = require('../../middleware/auth');
 
 async function index(req, res) {
-  const page   = parseInt(req.query.page) || 1;
-  const search = req.query.search || '';
-  const skip   = (page - 1) * 30;
+  const page    = parseInt(req.query.page) || 1;
+  const search  = req.query.search || '';
+  const groupId = req.query.groupId ? parseInt(req.query.groupId) : null;
+  const skip    = (page - 1) * 30;
 
   const where = {};
   if (search) {
@@ -15,29 +17,38 @@ async function index(req, res) {
       { satofillId: { contains: search } },
     ];
   }
+  if (groupId) where.groupId = groupId;
 
-  const [products, total, groups] = await Promise.all([
+  const [products, total, allGroups] = await Promise.all([
     prisma.product.findMany({
       where,
       skip,
       take:    30,
       orderBy: { createdAt: 'desc' },
-      include: { group: true },
+      include: { group: { include: { parent: true } } },
     }),
     prisma.product.count({ where }),
-    prisma.productGroup.findMany({ orderBy: { name: 'asc' } }),
+    prisma.productGroup.findMany({
+      orderBy: [{ parentId: 'asc' }, { sortOrder: 'asc' }],
+      include: { parent: true },
+    }),
   ]);
 
   res.render('products', {
     title: 'المنتجات',
     products, total,
     pages: Math.ceil(total / 30),
-    page, search, groups,
+    page, search,
+    groups: allGroups,
+    currentGroupId: groupId,
   });
 }
 
 async function createForm(req, res) {
-  const groups = await prisma.productGroup.findMany({ orderBy: { name: 'asc' } });
+  const groups = await prisma.productGroup.findMany({
+    orderBy: [{ parentId: 'asc' }, { name: 'asc' }],
+    include: { parent: true },
+  });
   res.render('product-form', { title: 'إضافة منتج', product: null, groups });
 }
 
@@ -49,20 +60,20 @@ async function create(req, res) {
   } = req.body;
 
   try {
-    if (!name)    throw new Error('اسم المنتج مطلوب');
+    if (!name)     throw new Error('اسم المنتج مطلوب');
     if (!priceUsd) throw new Error('السعر مطلوب');
-    if (!groupId)  throw new Error('الفئة مطلوبة');
+    if (!groupId)  throw new Error('التصنيف مطلوب');
 
     const product = await prisma.product.create({
       data: {
         groupId:      parseInt(groupId),
         satofillId:   satofillId || null,
         name,
-        nameAr:       nameAr       || null,
-        description:  description  || null,
+        nameAr:       nameAr      || null,
+        description:  description || null,
         priceUsd:     parseFloat(priceUsd),
         profitMargin: parseFloat(profitMargin || '0.20'),
-        minQuantity:  parseInt(minQuantity    || '100'),
+        minQuantity:  parseInt(minQuantity    || '1'),
         maxQuantity:  parseInt(maxQuantity    || '100000'),
         isManual:     isManual === 'on',
         isActive:     true,
@@ -92,13 +103,19 @@ async function editForm(req, res) {
     return res.redirect('/admin/products');
   }
 
-  const product = await prisma.product.findUnique({ where: { id } });
+  const [product, groups] = await Promise.all([
+    prisma.product.findUnique({ where: { id } }),
+    prisma.productGroup.findMany({
+      orderBy: [{ parentId: 'asc' }, { name: 'asc' }],
+      include: { parent: true },
+    }),
+  ]);
+
   if (!product) {
     req.session.error = 'المنتج غير موجود';
     return res.redirect('/admin/products');
   }
 
-  const groups = await prisma.productGroup.findMany({ orderBy: { name: 'asc' } });
   res.render('product-form', { title: `تعديل: ${product.name}`, product, groups });
 }
 
@@ -118,7 +135,7 @@ async function update(req, res) {
   try {
     if (!name)     throw new Error('اسم المنتج مطلوب');
     if (!priceUsd) throw new Error('السعر مطلوب');
-    if (!groupId)  throw new Error('الفئة مطلوبة');
+    if (!groupId)  throw new Error('التصنيف مطلوب');
 
     await prisma.product.update({
       where: { id: productId },
@@ -175,107 +192,228 @@ async function deleteProduct(req, res) {
   res.redirect('/admin/products');
 }
 
-// ─────────────────────────────────────────
-// SYNC FROM SATOFILL - إصلاح كامل
-// ─────────────────────────────────────────
 async function syncSatofill(req, res) {
   try {
-    const services = await satofill.getServices();
+    if (global.logger) global.logger.info('[SYNC] Starting manual sync from admin...');
 
-    if (!services || services.length === 0) {
-      req.session.error = 'لم يتم استرجاع أي خدمات من Satofill';
-      return res.redirect('/admin/products');
-    }
+    const result = await satofill.syncProductsToDB(prisma);
 
-    let synced  = 0;
-    let skipped = 0;
-    let errors  = 0;
+    const groupStats = await prisma.productGroup.groupBy({
+      by:    ['parentId'],
+      _count: { id: true },
+    });
 
-    for (const svc of services) {
-      try {
-        // ── استخراج الحقول بمرونة (API قد يختلف) ──
-        const serviceId  = String(svc.service  || svc.id    || '').trim();
-        const name       = String(svc.name     || svc.title || `Service ${serviceId}`).trim();
-        const category   = String(svc.category || svc.type  || 'General').trim();
-        const rateRaw    = svc.rate   || svc.price  || svc.cost || '0';
-        const minRaw     = svc.min    || svc.minimum || '100';
-        const maxRaw     = svc.max    || svc.maximum || '100000';
-
-        const priceUsd   = parseFloat(rateRaw);
-        const minQty     = parseInt(String(minRaw).replace(/[^0-9]/g, '')) || 100;
-        const maxQty     = parseInt(String(maxRaw).replace(/[^0-9]/g, '')) || 100000;
-
-        // تجاهل إذا كانت البيانات غير صالحة
-        if (!serviceId || isNaN(priceUsd) || priceUsd <= 0) {
-          skipped++;
-          continue;
-        }
-
-        // ── upsert الفئة ──
-        let group = await prisma.productGroup.findFirst({
-          where: { name: category },
-        });
-        if (!group) {
-          group = await prisma.productGroup.create({
-            data: { name: category, isActive: true },
-          });
-        }
-
-        // ── upsert المنتج ──
-        await prisma.product.upsert({
-          where:  { satofillId: serviceId },
-          update: {
-            name,
-            priceUsd,
-            minQuantity: minQty,
-            maxQuantity: maxQty,
-            groupId:     group.id,
-            isActive:    true,
-          },
-          create: {
-            satofillId:  serviceId,
-            name,
-            priceUsd,
-            minQuantity: minQty,
-            maxQuantity: maxQty,
-            profitMargin: 0.20,
-            isManual:    false,
-            isActive:    true,
-            groupId:     group.id,
-          },
-        });
-
-        synced++;
-      } catch (svcErr) {
-        errors++;
-        if (global.logger) {
-          global.logger.error(`[SYNC] Service error: ${svcErr.message}`);
-        }
-      }
-    }
+    const rootCount = groupStats.find(g => g.parentId === null)?._count?.id || 0;
+    const subCount  = groupStats
+      .filter(g => g.parentId !== null)
+      .reduce((s, g) => s + g._count.id, 0);
 
     await logAudit({
       adminId:   req.session.admin.id,
       action:    'SYNC_SATOFILL',
-      details:   { synced, skipped, errors, total: services.length },
+      details:   { synced: result.synced, skipped: result.skipped, errors: result.errors, total: result.total },
       ipAddress: req.ip,
     });
 
     req.session.success =
-      `تمت المزامنة: ${synced} منتج | تخطي: ${skipped} | أخطاء: ${errors}`;
+      `✅ تمت المزامنة: ${result.synced} منتج | ` +
+      `تصنيفات رئيسية: ${rootCount} | ` +
+      `تصنيفات فرعية: ${subCount} | ` +
+      `أخطاء: ${result.errors}`;
+
   } catch (err) {
-    req.session.error = `فشل الاتصال بـ Satofill: ${err.message}`;
+    if (global.logger) global.logger.error('[SYNC] Failed: ' + err.message);
+    req.session.error = 'فشل الاتصال بـ Satofill: ' + err.message;
   }
 
   res.redirect('/admin/products');
 }
 
+// ─────────────────────────────────────────
+// BULK ASSIGN CATEGORY
+// ─────────────────────────────────────────
+async function bulkAssignCategory(req, res) {
+  const { productIds, groupId } = req.body;
+
+  try {
+    if (!groupId) throw new Error('اختر تصنيفاً');
+
+    const rawIds = Array.isArray(productIds) ? productIds : [productIds];
+    const ids    = rawIds.map(id => parseInt(id)).filter(id => !isNaN(id));
+
+    if (ids.length === 0) throw new Error('لم تحدد أي منتجات');
+
+    const gId   = parseInt(groupId);
+    const group = await prisma.productGroup.findUnique({ where: { id: gId } });
+    if (!group) throw new Error('التصنيف غير موجود');
+
+    await prisma.product.updateMany({
+      where: { id: { in: ids } },
+      data:  { groupId: gId },
+    });
+
+    await logAudit({
+      adminId:   req.session.admin.id,
+      action:    'BULK_ASSIGN_CATEGORY',
+      details:   { productIds: ids, groupId: gId, groupName: group.name },
+      ipAddress: req.ip,
+    });
+
+    req.session.success = `✅ تم نقل ${ids.length} منتج إلى تصنيف "${group.name}"`;
+
+  } catch (err) {
+    req.session.error = err.message;
+  }
+
+  res.redirect('/admin/products');
+}
+
+// ─────────────────────────────────────────
+// CATEGORIES INDEX
+// ─────────────────────────────────────────
+async function categoriesIndex(req, res) {
+  const groups = await prisma.productGroup.findMany({
+    orderBy: [{ parentId: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
+    include: {
+      parent:   true,
+      children: { select: { id: true } },
+      _count:   { select: { products: true } },
+    },
+  });
+
+  const buildTree = (parentId) => {
+    return groups
+      .filter(g => g.parentId === parentId)
+      .map(g => ({ ...g, childGroups: buildTree(g.id) }));
+  };
+  const tree = buildTree(null);
+
+  res.render('categories', {
+    title: 'إدارة التصنيفات',
+    groups,
+    tree,
+  });
+}
+
+// ─────────────────────────────────────────
+// CREATE CATEGORY
+// ─────────────────────────────────────────
+async function createCategory(req, res) {
+  const { name, parentId } = req.body;
+
+  try {
+    if (!name || !name.trim()) throw new Error('اسم التصنيف مطلوب');
+
+    await prisma.productGroup.create({
+      data: {
+        name:     name.trim(),
+        parentId: parentId ? parseInt(parentId) : null,
+        isActive: true,
+        sortOrder: 0,
+      },
+    });
+
+    await logAudit({
+      adminId:   req.session.admin.id,
+      action:    'CREATE_CATEGORY',
+      ipAddress: req.ip,
+      details:   { name, parentId: parentId || null },
+    });
+
+    req.session.success = 'تم إضافة التصنيف: ' + name.trim();
+  } catch (err) {
+    req.session.error = err.message;
+  }
+
+  res.redirect('/admin/categories');
+}
+
+// ─────────────────────────────────────────
+// UPDATE CATEGORY PARENT
+// ─────────────────────────────────────────
+async function updateCategoryParent(req, res) {
+  const id       = parseInt(req.params.id);
+  const parentId = req.body.parentId ? parseInt(req.body.parentId) : null;
+
+  try {
+    if (id === parentId) throw new Error('لا يمكن تعيين التصنيف كأب لنفسه');
+
+    if (parentId) {
+      const potentialParent = await prisma.productGroup.findUnique({ where: { id: parentId } });
+      if (potentialParent && potentialParent.parentId === id) {
+        throw new Error('لا يمكن إنشاء حلقة في التصنيفات');
+      }
+    }
+
+    await prisma.productGroup.update({
+      where: { id },
+      data:  { parentId },
+    });
+
+    await logAudit({
+      adminId:    req.session.admin.id,
+      action:     'UPDATE_CATEGORY_PARENT',
+      targetType: 'product_group',
+      targetId:   id,
+      details:    { parentId },
+      ipAddress:  req.ip,
+    });
+
+    req.session.success = 'تم تحديث التصنيف الأب';
+  } catch (err) {
+    req.session.error = err.message;
+  }
+
+  res.redirect('/admin/categories');
+}
+
+// ─────────────────────────────────────────
+// DELETE CATEGORY
+// ─────────────────────────────────────────
+async function deleteCategory(req, res) {
+  const id = parseInt(req.params.id);
+
+  try {
+    const [productCount, childCount] = await Promise.all([
+      prisma.product.count({ where: { groupId: id } }),
+      prisma.productGroup.count({ where: { parentId: id } }),
+    ]);
+
+    if (productCount > 0) throw new Error('لا يمكن حذف تصنيف يحتوي على منتجات (' + productCount + ')');
+    if (childCount > 0)   throw new Error('لا يمكن حذف تصنيف يحتوي على تصنيفات فرعية (' + childCount + ')');
+
+    await prisma.productGroup.delete({ where: { id } });
+
+    await logAudit({
+      adminId:    req.session.admin.id,
+      action:     'DELETE_CATEGORY',
+      targetType: 'product_group',
+      targetId:   id,
+      ipAddress:  req.ip,
+    });
+
+    req.session.success = 'تم حذف التصنيف';
+  } catch (err) {
+    req.session.error = err.message;
+  }
+
+  res.redirect('/admin/categories');
+}
+
+// ─────────────────────────────────────────
+// EXPORTS
+// ─────────────────────────────────────────
 module.exports = {
   index,
   createForm,
   create,
   editForm,
   update,
-  delete:      deleteProduct,
+  delete:               deleteProduct,
   syncSatofill,
+  bulkAssignCategory,
+  categoriesIndex,
+  createCategory,
+  updateCategoryParent,
+  deleteCategory,
 };
